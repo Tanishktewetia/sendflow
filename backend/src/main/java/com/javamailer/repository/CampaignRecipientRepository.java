@@ -1,6 +1,8 @@
 package com.javamailer.repository;
 
 import com.javamailer.entity.CampaignRecipient;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -19,6 +21,16 @@ public interface CampaignRecipientRepository extends JpaRepository<CampaignRecip
      * Find all recipients for a campaign
      */
     List<CampaignRecipient> findByCampaignIdOrderByCreatedAtAsc(Long campaignId);
+    
+    /**
+     * Find recipients for a campaign (paginated)
+     */
+    Page<CampaignRecipient> findByCampaignIdOrderByCreatedAtDesc(Long campaignId, Pageable pageable);
+    
+    /**
+     * Count all recipients for a campaign
+     */
+    long countByCampaignId(Long campaignId);
     
     /**
      * Find pending recipients for a campaign (to send emails)

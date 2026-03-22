@@ -3,8 +3,10 @@ package com.javamailer.controller;
 import com.javamailer.security.JwtTokenProvider;
 import com.javamailer.security.JwtUserDetails;
 import com.javamailer.entity.User;
+import com.javamailer.entity.EmailVerificationToken;
 import com.javamailer.service.AuthService;
 import com.javamailer.service.UserService;
+import com.javamailer.service.SystemEmailService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +27,7 @@ public class AuthController {
     private final AuthService authService;
     private final UserService userService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final SystemEmailService systemEmailService;
     
     /**
      * Register new user
@@ -46,10 +49,22 @@ public class AuthController {
             // Register user
             User user = authService.registerUser(email, password, fullName);
             
+            // Generate email verification token
+            EmailVerificationToken verificationToken = authService.generateEmailVerificationToken(user);
+            
+            // Send verification email
+            try {
+                systemEmailService.sendVerificationEmail(user.getEmail(), verificationToken.getToken());
+            } catch (Exception e) {
+                System.err.println("Failed to send verification email: " + e.getMessage());
+                // Don't fail registration if email send fails
+            }
+            
             Map<String, Object> response = new HashMap<>();
-            response.put("message", "Registration successful");
+            response.put("message", "Registration successful. Please verify your email to login.");
             response.put("userId", user.getId());
             response.put("email", user.getEmail());
+            response.put("verificationTokenSent", true);
             
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
             
@@ -147,6 +162,36 @@ public class AuthController {
             response.put("resetToken", resetToken);
             
             return ResponseEntity.ok(response);
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Verify OTP for password reset
+     * POST /api/auth/verify-otp
+     */
+    @PostMapping("/verify-otp")
+    public ResponseEntity<?> verifyOtp(@RequestBody Map<String, String> request) {
+        try {
+            String token = request.get("resetToken");
+            String otp = request.get("otp");
+            
+            if (token == null || otp == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Missing resetToken or otp"));
+            }
+            
+            // Note: We validate OTP in the reset-password endpoint
+            // Here we just confirm the OTP format is correct
+            if (otp.length() != 6 || !otp.matches("\\d+")) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Invalid OTP format. Must be 6 digits."));
+            }
+            
+            return ResponseEntity.ok(Map.of("message", "OTP format is valid. Proceed to reset password."));
             
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest()

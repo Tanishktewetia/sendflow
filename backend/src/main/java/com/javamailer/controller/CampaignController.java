@@ -2,6 +2,8 @@ package com.javamailer.controller;
 
 import com.javamailer.security.JwtUserDetails;
 import com.javamailer.entity.Campaign;
+import com.javamailer.entity.CampaignRecipient;
+import com.javamailer.entity.EmailLog;
 import com.javamailer.service.CampaignService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -235,6 +237,118 @@ public class CampaignController {
             
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Execute campaign - send emails to all pending recipients
+     * POST /api/campaigns/{campaignId}/execute
+     */
+    @PostMapping("/{campaignId}/execute")
+    public ResponseEntity<?> executeCampaign(@PathVariable Long campaignId, Authentication authentication) {
+        try {
+            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
+            Long userId = userDetails.getUserId();
+            
+            // Verify ownership
+            Campaign campaign = campaignService.getCampaignByIdAndUserId(campaignId, userId)
+                    .orElseThrow(() -> new RuntimeException("Campaign not found"));
+            
+            // Execute campaign (send emails asynchronously)
+            // Running in a separate thread to avoid blocking the API response
+            new Thread(() -> {
+                try {
+                    campaignService.executeCampaign(campaignId, userId);
+                } catch (Exception e) {
+                    System.err.println("Error executing campaign " + campaignId + ": " + e.getMessage());
+                }
+            }).start();
+            
+            return ResponseEntity.ok(Map.of(
+                    "message", "Campaign execution started",
+                    "campaignId", campaignId,
+                    "status", "EXECUTING"
+            ));
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Get campaign recipients with pagination
+     * GET /api/campaigns/{campaignId}/recipients
+     */
+    @GetMapping("/{campaignId}/recipients")
+    public ResponseEntity<?> getCampaignRecipients(
+            @PathVariable Long campaignId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+        try {
+            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
+            Long userId = userDetails.getUserId();
+            
+            // Verify ownership
+            Campaign campaign = campaignService.getCampaignByIdAndUserId(campaignId, userId)
+                    .orElseThrow(() -> new RuntimeException("Campaign not found"));
+            
+            Page<CampaignRecipient> recipients = campaignService.getCampaignRecipients(
+                    campaignId,
+                    PageRequest.of(page, size)
+            );
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("recipients", recipients.getContent());
+            response.put("total", recipients.getTotalElements());
+            response.put("page", recipients.getPageable().getPageNumber());
+            response.put("size", recipients.getPageable().getPageSize());
+            response.put("totalPages", recipients.getTotalPages());
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Get campaign email logs with pagination
+     * GET /api/campaigns/{campaignId}/logs
+     */
+    @GetMapping("/{campaignId}/logs")
+    public ResponseEntity<?> getCampaignLogs(
+            @PathVariable Long campaignId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+        try {
+            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
+            Long userId = userDetails.getUserId();
+            
+            // Verify ownership
+            Campaign campaign = campaignService.getCampaignByIdAndUserId(campaignId, userId)
+                    .orElseThrow(() -> new RuntimeException("Campaign not found"));
+            
+            Page<EmailLog> logs = campaignService.getCampaignEmailLogs(
+                    campaignId,
+                    PageRequest.of(page, size)
+            );
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("logs", logs.getContent());
+            response.put("total", logs.getTotalElements());
+            response.put("page", logs.getPageable().getPageNumber());
+            response.put("size", logs.getPageable().getPageSize());
+            response.put("totalPages", logs.getTotalPages());
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", e.getMessage()));
         }
     }

@@ -17,6 +17,11 @@ import java.util.List;
 public interface EmailLogRepository extends JpaRepository<EmailLog, Long> {
     
     /**
+     * Find all logs for a campaign
+     */
+    List<EmailLog> findByCampaignId(Long campaignId);
+    
+    /**
      * Find all logs for a campaign (paginated)
      */
     Page<EmailLog> findByCampaignIdOrderBySentAtDesc(Long campaignId, Pageable pageable);
