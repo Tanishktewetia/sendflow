@@ -64,6 +64,31 @@
                     <button type="button" onclick="toggleForms()">Login</button>
                 </p>
             </form>
+
+            <!-- OTP Verification Modal for Registration -->
+            <div id="otpModal" class="modal-overlay">
+                <div class="otp-modal">
+                    <div class="otp-modal-header">
+                        <h2>Verify Your Email</h2>
+                        <button type="button" class="close-btn" onclick="closeOtpModal()">×</button>
+                    </div>
+                    <div class="otp-modal-body">
+                        <p>We sent a verification code to <strong id="otpEmailDisplay"></strong></p>
+                        <p class="otp-instruction">Enter the 6-digit code below:</p>
+                        
+                        <form id="otpForm">
+                            <div class="form-group">
+                                <input type="text" id="otpInput" placeholder="000000" maxlength="6" required inputmode="numeric">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Verify Code</button>
+                        </form>
+                        
+                        <div class="otp-footer">
+                            <p>Didn't receive the code? <button type="button" class="link-btn" onclick="resendOtpCode()">Resend</button></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <p class="auth-footer">

@@ -36,7 +36,6 @@ function initilizeApp() {
     restoreSectionStates(); // Restore collapsed/expanded state of stats sections
     updateDashboardStats(); // Update dashboard statistics
     activityLog.updateDisplay(); // Display activity log
-    showCoachMarksIfNew();
 }
 
 // SIDEBAR NAVIGATION
@@ -1768,56 +1767,7 @@ function showNotification(message, type = 'info', duration = 3000) {
 }
 
 // COACH MARKS
-const coachSteps = [
-    { title: 'Welcome to SendFlow', message: 'This is your dashboard. Let\'s take a quick tour!' },
-    { title: 'View Statistics', message: 'Your campaign stats appear here. Track sent, failed, and success rates.' },
-    { title: 'Compose Emails', message: 'Click "Compose Email" to write your campaign.' },
-    { title: 'Upload Recipients', message: 'Upload a CSV with your contact list.' },
-    { title: 'Configure Email', message: 'Set up SMTP or Resend in Settings.' },
-    { title: 'Send Campaign', message: 'Launch your campaign with one click.' },
-    { title: 'View Logs', message: 'Check campaign logs to see detailed results.' },
-    { title: 'Ready to Go!', message: 'You\'re all set. Happy emailing!' }
-];
 
-let currentCoachStep = 0;
-
-function showCoachMarksIfNew() {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    if (user.isNewUser) {
-        setTimeout(showCoachMarks, 500);
-    }
-}
-
-function showCoachMarks() {
-    document.getElementById('coachOverlay').style.display = 'block';
-    document.getElementById('coachPopup').style.display = 'block';
-    showCoachStep(0);
-}
-
-function showCoachStep(step) {
-    if (step >= coachSteps.length) {
-        skipTour();
-        return;
-    }
-
-    const data = coachSteps[step];
-    document.getElementById('coachTitle').textContent = data.title;
-    document.getElementById('coachMessage').textContent = data.message;
-    currentCoachStep = step;
-}
-
-function nextCoachStep() {
-    showCoachStep(currentCoachStep + 1);
-}
-
-function skipTour() {
-    document.getElementById('coachOverlay').style.display = 'none';
-    document.getElementById('coachPopup').style.display = 'none';
-    
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    user.isNewUser = false;
-    localStorage.setItem('user', JSON.stringify(user));
-}
 
 /* ============================== SETTINGS MODAL ============================== */
 
