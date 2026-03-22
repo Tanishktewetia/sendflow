@@ -62,10 +62,7 @@ public class CampaignService {
      * Get all campaigns for a user (paginated)
      */
     public Page<Campaign> getUserCampaigns(Long userId, Pageable pageable) {
-        List<Campaign> campaigns = campaignRepository.findByUserIdOrderByCreatedAtDesc(userId);
-        // Note: For true pagination with JpaRepository, you'd need a custom query
-        // This is simplified; use @Query with Pageable in real implementation
-        return Page.empty();
+        return campaignRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
     }
     
     /**

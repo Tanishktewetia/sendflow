@@ -1,6 +1,8 @@
 package com.javamailer.repository;
 
 import com.javamailer.entity.Campaign;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,7 +19,7 @@ import java.util.Optional;
 public interface CampaignRepository extends JpaRepository<Campaign, Long> {
     
     /**
-     * Find all campaigns for a user
+     * Find all campaigns for a user (returns List)
      */
     List<Campaign> findByUserIdOrderByCreatedAtDesc(Long userId);
     
@@ -41,6 +43,12 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
      * Find running campaigns
      */
     List<Campaign> findByStatusAndUserId(String status, Long userId);
+    
+    /**
+     * Find all campaigns for a user with pagination (PHASE 10)
+     * Overloaded method that returns Page instead of List
+     */
+    Page<Campaign> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
     
     /**
      * Count campaigns by status for a user

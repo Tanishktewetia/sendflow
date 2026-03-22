@@ -101,16 +101,16 @@ public class AuthService {
         emailVerificationTokenRepository.save(vToken);
         
         // Mark user as verified
-            Optional<User> user = userRepository.findById(vToken.getUserId());
-            if (user.isPresent()) {
-                User u = user.get();
-                u.setIsEmailVerified(true);
-                u.setEmailVerifiedAt(LocalDateTime.now());
-                u.setUpdatedAt(LocalDateTime.now());
-                userRepository.save(u);
-                return true;
-            }
+        Optional<User> user = userRepository.findById(vToken.getUserId());
+        if (user.isPresent()) {
+            User u = user.get();
+            u.setIsEmailVerified(true);
+            u.setEmailVerifiedAt(LocalDateTime.now());
+            u.setUpdatedAt(LocalDateTime.now());
+            userRepository.save(u);
+            return true;
         }
+        
         return false;
     }
     
