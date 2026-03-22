@@ -1,0 +1,83 @@
+# ==========================================
+# IDE and Editor Files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+*.iws
+*.ipr
+*.class
+*.log
+*.ctxt
+
+# ==========================================
+# Build Output
+# ==========================================
+target/
+dist/
+build/
+*.jar
+*.war
+*.ear
+*.zip
+
+# ==========================================
+# Maven
+# ==========================================
+.mvn/
+mvnw
+mvnw.cmd
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+.flattened-pom.xml
+
+# ==========================================
+# Node (if frontend uses npm in future)
+# ==========================================
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# ==========================================
+# Environment Variables
+# ==========================================
+.env
+.env.local
+.env.*.local
+application-*.properties
+
+# ==========================================
+# Runtime Files
+# ==========================================
+uploads/
+temp/
+cache/
+*.tmp
+*.pid
+*.seed
+
+# ==========================================
+# OS Specific
+# ==========================================
+Thumbs.db
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# ==========================================
+# Application Specific
+# ==========================================
+.spring-boot-devtools.properties
+*/logs/*
+!*/logs/.gitkeep
+*.bak

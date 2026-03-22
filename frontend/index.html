@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SendFlow - Bulk Email Platform</title>
+    <link rel="icon" type="image/x-icon" href="../public/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../public/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../public/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="../public/apple-touch-icon.png">
+    <link rel="manifest" href="../public/site.webmanifest">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/index.css">
+    <link rel="stylesheet" href="css/mobile-nav.css">
+</head>
+<body class="landing-page">
+    <!-- Mobile Navigation -->
+    <nav class="mobile-navbar">
+        <a href="index.html" class="mobile-logo">
+            <img src="../public/logo.png" alt="SendFlow Logo" class="navbar-logo">
+        </a>
+        <button class="mobile-menu-btn" id="mobileMenuBtn">
+            <i class="fas fa-bars"></i>
+        </button>
+    </nav>
+
+    <!-- Mobile Menu Overlay -->
+    <div class="mobile-menu-overlay" id="mobileMenuOverlay"></div>
+
+    <!-- Mobile Menu Panel -->
+    <nav class="mobile-menu-panel" id="mobileMenuPanel">
+        <ul class="mobile-menu-items">
+            <li class="mobile-menu-item">
+                <a href="index.html" class="mobile-menu-link active">Home</a>
+            </li>
+            <li class="mobile-menu-item">
+                <a href="how-it-works.html" class="mobile-menu-link">How It Works</a>
+            </li>
+            <li class="mobile-menu-item">
+                <a href="tos.html" class="mobile-menu-link">Terms</a>
+            </li>
+            <li class="mobile-menu-item">
+                <a href="privacy.html" class="mobile-menu-link">Privacy</a>
+            </li>
+            <li class="mobile-menu-item">
+                <button class="mobile-cta-btn" onclick="window.location.href='auth.html'">Get Started</button>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Desktop Navigation -->
+    <nav class="navbar navbar-landing">
+        <div class="navbar-container">
+            <a href="index.html" class="navbar-brand-link">
+                <div class="navbar-brand">
+                    <img src="../public/logo.png" alt="SendFlow Logo" class="navbar-logo">
+                </div>
+            </a>
+            <button class="hamburger" id="hamburgerBtn">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            <ul class="nav-menu" id="navMenu">
+                <li><a href="index.html" class="nav-link">Home</a></li>
+                <li><a href="how-it-works.html" class="nav-link">How It Works</a></li>
+                <li><a href="tos.html" class="nav-link">Terms</a></li>
+                <li><a href="privacy.html" class="nav-link">Privacy</a></li>
+                <li><a href="auth.html" class="nav-link nav-link-login">Get Started</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <div class="hero">
+        <div class="hero-content">
+            <h1>Send Bulk Emails<br>with Complete Control</h1>
+            <p>Upload your contact list, compose personalized emails, and launch campaigns instantly. Real-time analytics included.</p>
+            <div class="hero-cta">
+                <a href="auth.html" class="btn btn-primary btn-large">Get Started Free</a>
+                <a href="how-it-works.html" class="btn btn-secondary btn-large">Learn More</a>
+            </div>
+        </div>
+        <div class="hero-stats">
+            <div class="stat stat-card">
+                <div class="stat-number">100K+</div>
+                <div class="stat-label">Emails Sent</div>
+            </div>
+            <div class="stat stat-card">
+                <div class="stat-number">99.9%</div>
+                <div class="stat-label">Delivery Rate</div>
+            </div>
+            <div class="stat stat-card">
+                <div class="stat-number">24/7</div>
+                <div class="stat-label">Support</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Features Section -->
+    <section class="features">
+        <div class="container-landing">
+            <h2>Powerful Features</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="fas fa-file-upload"></i></div>
+                    <div class="feature-title">Easy Uploads</div>
+                    <p>Import CSV files with your contact list. Drag and drop or click to select.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="fas fa-pen-fancy"></i></div>
+                    <div class="feature-title">Smart Composer</div>
+                    <p>Create personalized emails with {{name}}, {{company}}, and custom tags.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="fas fa-rocket"></i></div>
+                    <div class="feature-title">Send Instantly</div>
+                    <p>Send to all recipients or specify a custom range. Full control over campaigns.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
+                    <div class="feature-title">Live Analytics</div>
+                    <p>Track sent, failed, pending, and success rates in real-time.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="fas fa-plug"></i></div>
+                    <div class="feature-title">Integrations</div>
+                    <p>SMTP, Resend, and more. Connect your favorite email service.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><i class="fas fa-lock"></i></div>
+                    <div class="feature-title">Secure & Reliable</div>
+                    <p>Enterprise-grade security with 99.9% uptime guarantee.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta cta-dark">
+        <h2>Ready to Send Campaigns?</h2>
+        <p>Join teams worldwide sending better emails</p>
+        <a href="auth.html" class="btn btn-cta btn-large">Get Started</a>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-section">
+                <h4>SendFlow</h4>
+                <p>Professional bulk email platform for modern teams.</p>
+            </div>
+            <div class="footer-section">
+                <h4>Links</h4>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="how-it-works.html">How It Works</a></li>
+                    <li><a href="tos.html">Terms</a></li>
+                    <li><a href="privacy.html">Privacy</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h4>Creator</h4>
+                <p><strong>Tanishk</strong></p>
+                <p><a href="mailto:tanishktewetia@gmail.com">tanishktewetia@gmail.com</a></p>
+                <p><a href="https://tanishkchaudhary.me" target="_blank">tanishkchaudhary.me</a></p>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2026 SendFlow. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/index.js"></script>
+</body>
+</html>

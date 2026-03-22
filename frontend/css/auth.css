@@ -1,0 +1,229 @@
+/* Auth Page Styles */
+
+.auth-page {
+    background: linear-gradient(135deg, #0d0d0d 0%, #1a1a1a 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.auth-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem;
+}
+
+.auth-card {
+    background: rgba(20, 20, 20, 0.95);
+    border: 1px solid rgba(16, 163, 127, 0.2);
+    border-radius: 12px;
+    padding: 1.3rem;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+}
+
+.auth-header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.auth-header img {
+    height: 48px;
+    width: auto;
+    object-fit: contain;
+    max-width: 100%;
+}
+
+.auth-form {
+    display: none;
+}
+
+.auth-form.active {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.auth-form h2 {
+    margin: 0 0 0.35rem 0;
+    font-size: 1.3rem;
+    color: #fff;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.form-group label {
+    font-weight: 600;
+    color: #e0e0e0;
+    font-size: 0.8rem;
+}
+
+
+.form-group input {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(16, 163, 127, 0.2);
+    color: #e0e0e0;
+    padding: 0.6rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    transition: all 0.3s;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: rgba(16, 163, 127, 0.6);
+    background: rgba(16, 163, 127, 0.05);
+    box-shadow: 0 0 10px rgba(16, 163, 127, 0.1);
+}
+
+.form-group input::placeholder {
+    color: #707070;
+}
+
+.forgot-password-link {
+    font-size: 0.8rem;
+    color: #10a37f;
+    text-decoration: none;
+    text-align: right;
+    margin-bottom: 0.5rem;
+    transition: color 0.2s;
+    display: inline-block;
+}
+
+.forgot-password-link:hover {
+    color: #088d64;
+    text-decoration: underline;
+}
+
+.btn {
+    padding: 0.55rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-size: 0.85rem;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+}
+
+.btn-primary {
+    background: #10a37f;
+    color: #0d0d0d;
+    width: 100%;
+}
+
+.btn-primary:hover {
+    background: #088d64;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(16, 163, 127, 0.3);
+}
+
+.form-toggle {
+    text-align: center;
+    color: #a0a0a0;
+    margin: 0.25rem 0 0 0;
+    font-size: 0.8rem;
+    margin-top: auto;
+}
+
+.form-toggle button {
+    background: none;
+    border: none;
+    color: #10a37f;
+    cursor: pointer;
+    text-decoration: underline;
+    font-weight: 600;
+    transition: color 0.2s;
+}
+
+.form-toggle button:hover {
+    color: #088d64;
+}
+
+.auth-footer {
+    margin-top: 1.2rem;
+    text-align: center;
+    color: #707070;
+    font-size: 0.85rem;
+}
+
+.auth-footer a {
+    color: #10a37f;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.auth-footer a:hover {
+    color: #088d64;
+    text-decoration: underline;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .auth-card {
+        max-width: 95%;
+    }
+}
+
+@media (max-width: 480px) {
+    .auth-page {
+        min-height: 100vh;
+        justify-content: flex-start;
+        padding-top: 1rem;
+    }
+
+    .auth-container {
+        padding: 1rem 1rem 2rem 1rem;
+    }
+
+    .auth-card {
+        max-width: 100%;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+    }
+
+    .auth-header {
+        margin-bottom: 0.5rem;
+    }
+
+    .auth-header h1 {
+        font-size: 1.2rem;
+    }
+
+    .auth-form {
+        gap: 0.4rem !important;
+    }
+
+    .auth-form h2 {
+        font-size: 1rem;
+    }
+
+    .form-group input {
+        padding: 0.5rem;
+        font-size: 0.8rem;
+    }
+
+    .btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.8rem;
+    }
+}

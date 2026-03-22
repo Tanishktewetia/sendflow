@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SendFlow - How It Works</title>
+    <link rel="icon" type="image/x-icon" href="../public/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../public/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../public/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="../public/apple-touch-icon.png">
+    <link rel="manifest" href="../public/site.webmanifest">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/index.css">
+    <link rel="stylesheet" href="css/mobile-nav.css">
+    <link rel="stylesheet" href="css/static-pages.css">
+</head>
+<body class="landing-page">
+    <!-- Navigation -->
+    <nav class="navbar navbar-landing">
+        <div class="navbar-container">
+            <a href="index.html" class="navbar-brand-link">
+                <div class="navbar-brand">
+                    <img src="../public/logo.png" alt="SendFlow Logo" class="navbar-logo">
+                </div>
+            </a>
+            <ul class="nav-menu">
+                <li><a href="index.html" class="nav-link">Home</a></li>
+                <li><a href="index.html#how-it-works" class="nav-link">How It Works</a></li>
+                <li><a href="tos.html" class="nav-link">Terms</a></li>
+                <li><a href="privacy.html" class="nav-link">Privacy</a></li>
+                <li><a href="auth.html" class="nav-link nav-link-login">Get Started</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="static-page-container">
+        <h1>How It Works</h1>
+        <p class="last-updated">Complete guide to using SendFlow</p>
+
+        <section class="policy-section">
+            <h2>1. Create Your Account</h2>
+            <p>Sign up for a free SendFlow account in seconds. No credit card required. Simply provide your name, email, and create a password. Your account is instantly ready to use.</p>
+        </section>
+
+        <section class="policy-section">
+            <h2>2. Configure Your Email Provider</h2>
+            <p>Choose how you want to send emails:</p>
+            <ul>
+                <li><strong>SMTP:</strong> Connect your Gmail, Outlook, or any SMTP server. Add your email address, display name, SMTP host, port, and app password.</li>
+                <li><strong>Resend API:</strong> Use the Resend service by providing your API key and email address.</li>
+                <li><strong>Other providers:</strong> More integrations coming soon!</li>
+            </ul>
+            <p>You can add multiple email accounts and switch between them anytime.</p>
+        </section>
+
+        <section class="policy-section">
+            <h2>3. Prepare Your Recipient List</h2>
+            <p>Prepare a CSV file with your contact information:</p>
+            <ul>
+                <li><strong>Required columns:</strong> name, email</li>
+                <li><strong>Optional columns:</strong> company, customField1, customField2</li>
+            </ul>
+            <p>Upload your CSV file by dragging and dropping it, or click to select. SendFlow will preview the data before processing.</p>
+        </section>
+
+        <section class="policy-section">
+            <h2>4. Compose Your Campaign</h2>
+            <p>Create your email campaign with these features:</p>
+            <ul>
+                <li><strong>Subject Line:</strong> Enter your email subject</li>
+                <li><strong>HTML Body:</strong> Write your email content with HTML support</li>
+                <li><strong>Personalization:</strong> Use dynamic tags like {{name}}, {{email}}, {{company}}, {{customField1}}, {{customField2}}</li>
+                <li><strong>Live Preview:</strong> See how your email will look before sending</li>
+            </ul>
+            <p>Example: "Hello {{name}} at {{company}}! Check out our latest updates." Each recipient will see their personalized message.</p>
+        </section>
+
+        <section class="policy-section">
+            <h2>5. Select Recipients</h2>
+            <p>Choose who receives your campaign:</p>
+            <ul>
+                <li><strong>Send to All:</strong> Email all recipients from your uploaded list</li>
+                <li><strong>Custom Range:</strong> Specify a range (e.g., recipients 1-100 or 50-200)</li>
+            </ul>
+            <p>This flexibility allows you to test campaigns or target specific audience segments.</p>
+        </section>
+
+        <section class="policy-section">
+            <h2>6. Launch Your Campaign</h2>
+            <p>Click the "Start Campaign" button to send your emails. SendFlow will:</p>
+            <ul>
+                <li>Validate your email configuration</li>
+                <li>Process your recipient list</li>
+                <li>Personalize each email with recipient data</li>
+                <li>Send emails through your configured provider</li>
+                <li>Track delivery status in real-time</li>
+            </ul>
+        </section>
+
+        <section class="policy-section">
+            <h2>7. Monitor Your Campaign</h2>
+            <p>Once launched, you can monitor:</p>
+            <ul>
+                <li><strong>Total Emails:</strong> Number of recipients receiving the campaign</li>
+                <li><strong>Sent:</strong> Successfully delivered emails</li>
+                <li><strong>Failed:</strong> Emails that couldn't be delivered</li>
+                <li><strong>Pending:</strong> Emails currently being processed</li>
+                <li><strong>Success Rate:</strong> Percentage of successful deliveries</li>
+            </ul>
+        </section>
+
+        <section class="policy-section">
+            <h2>8. View Campaign Logs</h2>
+            <p>Access detailed logs for each campaign including:</p>
+            <ul>
+                <li>Campaign name and creation date</li>
+                <li>Number of recipients</li>
+                <li>Email provider used</li>
+                <li>Delivery statistics</li>
+                <li>Error details for failed emails</li>
+            </ul>
+        </section>
+
+        <section class="policy-section">
+            <h2>Best Practices</h2>
+            <p>Follow these recommendations for best results:</p>
+            <ul>
+                <li><strong>Test First:</strong> Send a test campaign to a small group before launching to all recipients</li>
+                <li><strong>Personalize:</strong> Use dynamic tags to make emails personal and relevant</li>
+                <li><strong>Clean List:</strong> Ensure your recipient list has valid, unique email addresses</li>
+                <li><strong>Monitor Delivery:</strong> Check success rates and fix any configuration issues</li>
+                <li><strong>Respect Privacy:</strong> Always comply with email regulations and recipient preferences</li>
+                <li><strong>Follow Up:</strong> Use campaigns strategically to nurture relationships with your audience</li>
+            </ul>
+        </section>
+
+        <section class="policy-section">
+            <h2>Troubleshooting</h2>
+            <p>Common issues and solutions:</p>
+            <ul>
+                <li><strong>Email failed to send:</strong> Check your email provider configuration and ensure credentials are correct</li>
+                <li><strong>CSV upload error:</strong> Verify your CSV has "name" and "email" columns with valid data</li>
+                <li><strong>Personalization not working:</strong> Ensure you're using correct tag format {{columnName}}</li>
+                <li><strong>Low success rate:</strong> Check recipient email addresses are valid and not marked as spam</li>
+            </ul>
+        </section>
+
+        <section class="policy-section">
+            <h2>Need Help?</h2>
+            <p>Contact us for support:</p>
+            <p>
+                <strong>Email:</strong> <a href="mailto:tanishktewetia@gmail.com">tanishktewetia@gmail.com</a><br>
+                <strong>Website:</strong> <a href="https://tanishkchaudhary.me" target="_blank">tanishkchaudhary.me</a>
+            </p>
+        </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-section">
+                <h4>SendFlow</h4>
+                <p>Professional bulk email platform for modern teams.</p>
+            </div>
+            <div class="footer-section">
+                <h4>Links</h4>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="index.html#how-it-works">How It Works</a></li>
+                    <li><a href="tos.html">Terms</a></li>
+                    <li><a href="privacy.html">Privacy</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h4>Creator</h4>
+                <p><strong>Tanishk</strong></p>
+                <p><a href="mailto:tanishktewetia@gmail.com">tanishktewetia@gmail.com</a></p>
+                <p><a href="https://tanishkchaudhary.me" target="_blank">tanishkchaudhary.me</a></p>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2026 SendFlow. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>

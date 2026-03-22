@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SendFlow - Dashboard</title>
+    <link rel="icon" type="image/x-icon" href="../public/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="../public/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../public/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="../public/apple-touch-icon.png">
+    <link rel="manifest" href="../public/site.webmanifest">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="app-page">
+    <!-- Mobile Sidebar Toggle -->
+    <div class="mobile-menu-toggle" id="mobileMenuToggle">
+        <span class="toggle-arrow">></span>
+    </div>
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <a href="app.html" class="logo-link"><img src="../public/logo.png" alt="SendFlow Logo" class="sidebar-logo"></a>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-section="dashboard">
+                <i class="fas fa-chart-bar"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="#" class="nav-item" data-section="compose">
+                <i class="fas fa-pen"></i>
+                <span>Compose Email</span>
+            </a>
+            <a href="#" class="nav-item" data-section="upload">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <span>Upload CSV</span>
+            </a>
+            <a href="#" class="nav-item" data-section="logs">
+                <i class="fas fa-history"></i>
+                <span>Logs</span>
+            </a>
+        </nav>
+
+        <!-- Profile Section -->
+        <div class="sidebar-profile">
+            <button id="profileSidebarBtn" class="profile-sidebar-button">
+                <div class="avatar-container">
+                    <img id="sidebarAvatar" class="sidebar-avatar-image" src="" alt="User Avatar" style="display: none;">
+                    <i id="sidebarAvatarIcon" class="fas fa-user-circle"></i>
+                </div>
+                <span id="userNameDisplay">User</span>
+            </button>
+            <div class="profile-tooltip" id="profileTooltip">
+                <a href="#" class="profile-option">Profile</a>
+                <a href="#" class="profile-option">Settings</a>
+                <a href="#" class="profile-option" onclick="restartTour(); return false;">
+                    <i class="fas fa-compass" style="margin-right: 0.5rem;"></i>Start Tour
+                </a>
+                <a href="index.html" class="profile-option" onclick="handleLogout()">Logout</a>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Profile Modal Overlay -->
+    <div class="profile-modal-overlay" id="profileModalOverlay"></div>
+
+    <!-- Profile Edit Modal -->
+    <div class="profile-modal" id="profileModal">
+        <div class="profile-modal-header">
+            <h2>Edit profile</h2>
+            <button class="profile-modal-close" id="profileModalClose">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="profile-modal-content">
+            <!-- Profile Picture -->
+            <div class="profile-picture-section">
+                <img id="profileImage" src="https://via.placeholder.com/100" alt="Profile" class="profile-picture">
+                <input type="file" id="profileImageInput" accept="image/*" style="display: none;">
+                <button id="profileImageUploadBtn" class="profile-image-upload-btn">
+                    <i class="fas fa-camera"></i>
+                </button>
+            </div>
+
+            <!-- Form -->
+            <form id="profileEditForm">
+                <!-- Display name -->
+                <div class="form-group">
+                    <label>Display name</label>
+                    <input type="text" id="profileDisplayName" placeholder="Enter your name" />
+                </div>
+
+                <!-- Email -->
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="profileEmail" placeholder="your@email.com" readonly />
+                </div>
+
+                <!-- Info text -->
+                <p class="profile-info-text">Keep your profile up to date so others can recognize you easily.</p>
+
+                <!-- Buttons -->
+                <div class="profile-modal-buttons">
+                    <button type="button" class="btn-cancel" id="profileModalCancel">Cancel</button>
+                    <button type="submit" class="btn-save">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Settings Modal Overlay -->
+    <div class="settings-modal-overlay" id="settingsModalOverlay"></div>
+
+    <!-- Settings Modal -->
+    <div class="settings-modal" id="settingsModal">
+        <!-- Left Navigation -->
+        <div class="settings-nav">
+            <div class="settings-nav-header">Settings</div>
+            <button class="settings-nav-item active" data-section="email-provider">
+                <i class="fas fa-envelope"></i>
+                <span>Email Provider</span>
+            </button>
+            <button class="settings-nav-item" data-section="security">
+                <i class="fas fa-lock"></i>
+                <span>Security</span>
+            </button>
+            <button class="settings-nav-item" data-section="delete-account">
+                <i class="fas fa-trash"></i>
+                <span>Delete Account</span>
+            </button>
+            <button class="settings-close-btn" id="settingsCloseBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <!-- Right Content -->
+        <div class="settings-content">
+            <!-- EMAIL PROVIDER SECTION -->
+            <div class="settings-section active" id="email-provider-section">
+                <h3>Email Providers</h3>
+                <p class="section-description">Configure your email providers to send campaigns. You must verify credentials before use.</p>
+                
+                <!-- Add Provider Form -->
+                <div class="add-provider-form" id="emailProvidersForm">
+                    <h4>Add Email Provider</h4>
+                    <div class="provider-selector">
+                        <select id="providerType" class="provider-select">
+                            <option value="">Select Provider</option>
+                            <option value="smtp">SMTP</option>
+                            <option value="resend">Resend</option>
+                            <option value="outlook">Outlook/Hotmail</option>
+                            <option value="sendgrid" disabled>SendGrid (Coming Soon)</option>
+                            <option value="mailgun" disabled>Mailgun (Coming Soon)</option>
+                        </select>
+                    </div>
+                    
+                    <!-- SMTP Fields -->
+                    <div id="smtpFields" style="display: none;" class="provider-fields">
+                        <div class="form-group">
+                            <label>Provider Name</label>
+                            <input type="text" id="smtpName" placeholder="e.g., My Gmail Account" />
+                        </div>
+                        <div class="form-group">
+                            <label>Email Address</label>
+                            <input type="email" id="smtpEmail" placeholder="your@gmail.com" />
+                        </div>
+                        <div class="form-group">
+                            <label>App Password</label>
+                            <input type="password" id="smtpPassword" placeholder="Enter Gmail app password" />
+                        </div>
+                        <!-- SMTP Help Info -->
+                        <div class="provider-help-box smtp-help">
+                            <h5>How to get SMTP App Password:</h5>
+                            <ol>
+                                <li>Go to your <strong>Google Account</strong> settings</li>
+                                <li>Enable <strong>2-Step Verification</strong> (if not already enabled)</li>
+                                <li>Go to <strong>"App passwords"</strong> in Security section</li>
+                                <li>Select <strong>Mail</strong> and <strong>Windows Computer</strong> (or your device)</li>
+                                <li>Google will generate a 16-character app password</li>
+                                <li>Copy and paste it above</li>
+                            </ol>
+                            <p>📖 <a href="https://support.google.com/accounts/answer/185833" target="_blank">Official Google Documentation</a></p>
+                        </div>
+                    </div>
+                    
+                    <!-- Resend Fields -->
+                    <div id="resendFields" style="display: none;" class="provider-fields">
+                        <div class="form-group">
+                            <label>Provider Name</label>
+                            <input type="text" id="resendName" placeholder="e.g., My Resend Account" />
+                        </div>
+                        <div class="form-group">
+                            <label>Email Address</label>
+                            <input type="email" id="resendEmail" placeholder="your@example.com" />
+                        </div>
+                        <div class="form-group">
+                            <label>API Key</label>
+                            <input type="password" id="resendApiKey" placeholder="Enter Resend API key" />
+                        </div>
+                        <!-- Resend Help Info -->
+                        <div class="provider-help-box resend-help">
+                            <h5>How to get Resend API Key:</h5>
+                            <ol>
+                                <li>Sign up or log in to <strong><a href="https://resend.com" target="_blank">Resend.com</a></strong></li>
+                                <li>Go to <strong>Dashboard → API Keys</strong></li>
+                                <li>Click <strong>"Create API Key"</strong></li>
+                                <li>Give it a name (e.g., "Java Mailer")</li>
+                                <li>Copy the generated key and paste it above</li>
+                                <li>Verify your domain in Resend settings</li>
+                            </ol>
+                            <p>📖 <a href="https://resend.com/docs" target="_blank">Resend Official Documentation</a></p>
+                        </div>
+                    </div>
+                    
+                    <!-- Outlook/Hotmail Fields -->
+                    <div id="outlookFields" style="display: none;" class="provider-fields">
+                        <div class="form-group">
+                            <label>Provider Name</label>
+                            <input type="text" id="outlookName" placeholder="e.g., My Outlook Account" />
+                        </div>
+                        <div class="form-group">
+                            <label>Email Address</label>
+                            <input type="email" id="outlookEmail" placeholder="your@outlook.com" />
+                        </div>
+                        <div class="form-group">
+                            <label>App Password</label>
+                            <input type="password" id="outlookPassword" placeholder="Enter Outlook app password" />
+                        </div>
+                        <!-- Outlook Help Info -->
+                        <div class="provider-help-box outlook-help">
+                            <h5>How to get Outlook App Password:</h5>
+                            <ol>
+                                <li>Go to <strong><a href="https://account.microsoft.com" target="_blank">account.microsoft.com</a></strong></li>
+                                <li>Click <strong>"Security"</strong> from the left menu</li>
+                                <li>Enable <strong>"Two-step verification"</strong> (if not already enabled)</li>
+                                <li>Look for <strong>"App passwords"</strong> option</li>
+                                <li>Click on it and select <strong>Mail</strong> and <strong>Windows</strong></li>
+                                <li>Microsoft will generate a 16-character app password</li>
+                                <li>Copy and paste it above</li>
+                            </ol>
+                            <p>📖 <a href="https://support.microsoft.com/en-us/account-billing/using-app-passwords-with-your-microsoft-account" target="_blank">Microsoft App Passwords Documentation</a></p>
+                        </div>
+                    </div>
+                    
+                    <!-- Verification Status -->
+                    <div id="verificationStatus" class="verification-status" style="display: none;">
+                        <p id="verificationMessage"></p>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="provider-form-buttons">
+                        <button id="verifyProviderBtn" class="btn btn-primary">Verify Now</button>
+                        <button id="addProviderBtn" class="btn btn-primary" style="display: none;">Add Provider</button>
+                    </div>
+                </div>
+                
+                <!-- List of Added Providers -->
+                <div class="providers-list" id="providersList">
+                    <h4>Your Email Providers</h4>
+                    <div id="providersContainer" class="providers-container">
+                        <p class="empty-state">No email providers added yet</p>
+                    </div>
+                </div>
+                
+                <!-- Default Email Setting -->
+                <div class="default-email-setting">
+                    <h4>Email Selection Preference</h4>
+                    <div class="radio-group">
+                        <label class="radio-option">
+                            <input type="radio" name="emailSelection" value="default" checked>
+                            <span>Always use default email</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="emailSelection" value="prompt">
+                            <span>Ask me to select email when starting campaign</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECURITY SECTION -->
+            <div class="settings-section" id="security-section">
+                <h3>Security</h3>
+                <p class="section-description">Update your password and manage security settings.</p>
+                
+                <form id="passwordForm" class="password-form">
+                    <div class="form-group">
+                        <label>Current Password</label>
+                        <input type="password" id="currentPassword" placeholder="Enter current password" required />
+                    </div>
+                    <div class="form-group">
+                        <label>New Password</label>
+                        <input type="password" id="newPassword" placeholder="Enter new password" required />
+                    </div>
+                    <div class="form-group">
+                        <label>Repeat New Password</label>
+                        <input type="password" id="repeatPassword" placeholder="Repeat new password" required />
+                    </div>
+                    <button type="submit" class="btn btn-primary">Update Password</button>
+                </form>
+            </div>
+
+            <!-- DELETE ACCOUNT SECTION -->
+            <div class="settings-section" id="delete-account-section">
+                <h3>Delete Account</h3>
+                <div class="delete-warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p><strong>Warning:</strong> This action cannot be undone. Deleting your account will permanently remove all your data, campaigns, and email providers. Please make sure you want to proceed.</p>
+                </div>
+                <button id="deleteAccountBtn" class="btn btn-danger">Delete Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+        <!-- Navbar -->
+        <nav class="navbar app-navbar">
+            <div class="navbar-left">
+                <h1 class="page-title">Dashboard</h1>
+            </div>
+
+        </nav>
+
+        <!-- Content Container -->
+        <div class="content-container">
+
+            <!-- DASHBOARD SECTION -->
+            <section id="dashboard-section" class="content-section active">
+                <!-- Stats Grid with Sections -->
+                
+                <!-- CURRENTLY RUNNING CAMPAIGN Section -->
+                <div class="stats-section">
+                    <h3 class="stats-section-title">Currently Running Campaign</h3>
+                    <div class="stats-grid stats-grid-running">
+                        <div class="stat-card stat-card-running">
+                            <div class="stat-label">Campaign Progress</div>
+                            <div class="stat-value" id="statCampaignProgress">0/0</div>
+                        </div>
+                        <div class="stat-card stat-card-running">
+                            <div class="stat-label">Mail Provider Set</div>
+                            <div class="stat-value" id="statMailProviderSet">None</div>
+                        </div>
+                        <div class="stat-card stat-card-running">
+                            <div class="stat-label">CSV to Process</div>
+                            <div class="stat-value" id="statFailedCampaign">0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TODAY'S SESSION Section (Collapsible) -->
+                <div class="stats-section stats-section-collapsible">
+                    <div class="collapsible-header" onclick="toggleSection('todaySession')">
+                        <h3 class="stats-section-title">Today's Session</h3>
+                        <i class="fas fa-chevron-down collapse-icon" id="todaySessionIcon"></i>
+                    </div>
+                    <div class="stats-grid stats-grid-session" id="todaySessionContent" style="display: none;">
+                        <div class="stat-card stat-card-session">
+                            <div class="stat-label">Sent (Today)</div>
+                            <div class="stat-value" id="statSent">0</div>
+                        </div>
+                        <div class="stat-card stat-card-session">
+                            <div class="stat-label">Failed (Today)</div>
+                            <div class="stat-value" id="statFailed">0</div>
+                        </div>
+                        <div class="stat-card stat-card-session">
+                            <div class="stat-label">Success Rate (Today)</div>
+                            <div class="stat-value" id="statTodaySuccessRate">0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TILL DATE (LIFETIME) Section (Collapsible) -->
+                <div class="stats-section stats-section-collapsible">
+                    <div class="collapsible-header" onclick="toggleSection('tillDate')">
+                        <h3 class="stats-section-title till-date-title">Till Date (Lifetime)</h3>
+                        <i class="fas fa-chevron-down collapse-icon" id="tillDateIcon"></i>
+                    </div>
+                    <div class="stats-grid stats-grid-till-date" id="tillDateContent" style="display: none;">
+                        <div class="stat-card stat-card-till-date">
+                            <div class="stat-label">Total Sent</div>
+                            <div class="stat-value" id="statTotalSent">0</div>
+                        </div>
+                        <div class="stat-card stat-card-till-date">
+                            <div class="stat-label">Total Failed</div>
+                            <div class="stat-value" id="statTotalFailed">0</div>
+                        </div>
+                        <div class="stat-card stat-card-till-date">
+                            <div class="stat-label">Overall Success Rate</div>
+                            <div class="stat-value" id="statSuccessRate">0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="section-card">
+                    <h3>Recent Activity (Last 15 Events)</h3>
+                    <div id="activityList" class="activity-list">
+                        <div class="empty-state"><i class="fas fa-inbox"></i> No recent activity</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- COMPOSE SECTION -->
+            <section id="compose-section" class="content-section">
+                <div class="section-card">
+                    <h3>Compose Email Campaign</h3>
+
+                    <form id="composeForm" class="form-group">
+                        <div class="form-row">
+                            <label>Email Subject *</label>
+                            <input type="text" id="emailSubject" placeholder="Campaign subject" required>
+                        </div>
+
+                        <div class="form-row">
+                            <label>Email Body (HTML) *</label>
+                            <textarea id="emailBody" placeholder="Hello {{name}},&#10;&#10;Your email content here..." rows="10" required></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <label>Send To *</label>
+                            <select id="sendToOption">
+                                <option value="all">All Recipients</option>
+                                <option value="range">Custom Range</option>
+                            </select>
+                        </div>
+
+                        <div id="rangeInputs" class="form-row range-inputs" style="display: none;">
+                            <label>Recipient Range</label>
+                            <div class="range-grid">
+                                <div>
+                                    <span>From:</span>
+                                    <input type="number" id="rangeFrom" min="1" value="1">
+                                </div>
+                                <div>
+                                    <span>To:</span>
+                                    <input type="number" id="rangeTo" min="1" value="1">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <label>Preview</label>
+                            <div class="preview-box">
+                                <p><strong>Subject:</strong> <span id="previewSubject">-</span></p>
+                                <p><strong>Body Preview:</strong> <span id="previewBody">-</span></p>
+                                <p><strong>Recipients:</strong> <span id="previewCount">0</span></p>
+                            </div>
+                        </div>
+
+                        <div class="info-box">
+                            <p><strong>Available Tags:</strong></p>
+                            <p>Use {{name}}, {{email}}, {{company}}, {{customField1}}, {{customField2}} for personalization</p>
+                        </div>
+
+                        <div class="compose-button-group">
+                            <button type="button" class="btn btn-secondary" id="saveDraftBtn">Save Draft</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- UPLOAD SECTION -->
+            <section id="upload-section" class="content-section">
+                <div class="section-card">
+                    <h3>Upload CSV Recipients</h3>
+
+                    <form id="uploadForm" class="upload-area" ondrop="handleDrop(event)" ondragover="handleDragOver(event)">
+                        <div class="upload-content">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <p>Drag and drop your CSV file here</p>
+                            <p>or</p>
+                            <input type="file" id="csvFile" accept=".csv" style="display: none;">
+                            <button type="button" class="btn btn-secondary" onclick="document.getElementById('csvFile').click()">
+                                Choose File
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- CSV Format Info Box -->
+                    <div class="csv-format-info">
+                        <div class="info-header">
+                            <i class="fas fa-info-circle"></i>
+                            <h4>CSV Format Requirements</h4>
+                        </div>
+                        <div class="info-content">
+                            <div class="format-section">
+                                <p class="format-label"><strong>Required Columns:</strong></p>
+                                <ul class="format-list">
+                                    <li><code>name</code> - Recipient's full name</li>
+                                    <li><code>email</code> - Recipient's email address</li>
+                                </ul>
+                            </div>
+                            <div class="format-section">
+                                <p class="format-label"><strong>Optional Columns:</strong></p>
+                                <ul class="format-list">
+                                    <li><code>company</code> - Company name</li>
+                                    <li><code>customField1</code> - Custom field 1</li>
+                                    <li><code>customField2</code> - Custom field 2</li>
+                                </ul>
+                            </div>
+                            <div class="format-section">
+                                <p class="format-label"><strong>Example CSV:</strong></p>
+                                <pre class="format-example">name,email,company
+John Doe,john@example.com,Acme Corp
+Jane Smith,jane@example.com,Tech Inc
+Bob Johnson,bob@example.com,Global Solutions</pre>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="uploadInfo" style="display: none;" class="info-box">
+                        <p><strong>Required Columns:</strong> name, email</p>
+                        <p><strong>Optional Columns:</strong> company, customField1, customField2</p>
+                        <p><strong>Example:</strong></p>
+                        <p>name,email,company</p>
+                        <p>John Doe,john@example.com,Acme Corp</p>
+                    </div>
+
+                    <div id="filePreview" style="display: none;">
+                        <h4>File Preview</h4>
+                        <table class="preview-table" id="previewTable"></table>
+                        <button type="button" class="btn btn-primary" onclick="confirmUpload()">Confirm Upload</button>
+                        <button type="button" class="btn btn-secondary" onclick="resetUpload()">Cancel</button>
+                    </div>
+
+                    <!-- CSV Queue Display -->
+                    <div id="csvQueueSection" style="display: none; margin-top: 2rem;">
+                        <h4>CSV Queue <span id="queueCount" class="badge">(0/5)</span></h4>
+                        <div id="csvQueueList" class="csv-queue-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- LOGS SECTION -->
+            <section id="logs-section" class="content-section">
+                <div class="section-card">
+                    <div class="terminal-header">
+                        <h3>Campaign Logs Terminal</h3>
+                        <button id="clearLogsBtn" class="btn btn-secondary btn-small">
+                            <i class="fas fa-trash"></i> Clear Logs
+                        </button>
+                    </div>
+                    <div id="logsList" class="terminal-window">
+                        <div class="terminal-content">
+                            <p class="terminal-line terminal-info">$ System ready...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Campaign Control -->
+        <div class="campaign-control">
+            <button id="startBtn" class="btn btn-primary">
+                <i class="fas fa-play"></i> Start Campaign
+            </button>
+            <button id="pauseBtn" class="btn btn-primary" style="display: none;">
+                <i class="fas fa-pause"></i> Pause Campaign
+            </button>
+            <button id="resetBtn" class="btn btn-secondary" onclick="handleResetStuckCSV()" title="Reset stuck CSV" style="padding: 8px 12px;">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+            <span id="campaignStatus" class="campaign-status"></span>
+            <span id="campaignTimer" class="campaign-timer" style="margin-left: 1rem; font-weight: 600; color: #10a37f;"></span>
+        </div>
+    </main>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay"></div>
+    <div class="modal" id="modal">
+        <h3 id="modalTitle"></h3>
+        <p id="modalMessage"></p>
+        <div class="modal-buttons">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" id="modalConfirm">Confirm</button>
+        </div>
+    </div>
+
+    <!-- Email Selection Modal for Campaign -->
+    <div class="modal-overlay" id="emailSelectionOverlay" style="display: none;"></div>
+    <div class="modal email-selection-modal" id="emailSelectionModal" style="display: none;">
+        <h3>Select Email Provider</h3>
+        <p class="modal-description">You have multiple email providers configured. Choose which one to use for this campaign:</p>
+        <div id="emailProvidersList" class="email-providers-list">
+            <!-- Generated by JavaScript -->
+        </div>
+        <div class="modal-buttons">
+            <button class="btn btn-secondary" onclick="cancelEmailSelection()">Cancel</button>
+            <button class="btn btn-primary" id="confirmEmailBtn" onclick="confirmEmailSelection()">Continue</button>
+        </div>
+    </div>
+
+    <!-- Coach Marks (Guided Tour) -->
+    <div class="coach-overlay" id="coachOverlay" style="display: none;"></div>
+    <div class="coach-popup" id="coachPopup" style="display: none;">
+        <div class="coach-header">
+            <h4 id="coachTitle"></h4>
+            <button onclick="skipTour()" class="close-popup">&times;</button>
+        </div>
+        <p id="coachMessage"></p>
+        <div class="coach-buttons">
+            <button class="btn btn-secondary btn-small" onclick="skipTour()">Skip</button>
+            <button class="btn btn-primary btn-small" onclick="nextCoachStep()">Next</button>
+        </div>
+    </div>
+
+    <!-- Notification -->
+    <div class="notification" id="notification"></div>
+
+    <!-- Driver.js Library (local from node_modules) -->
+    <link rel="stylesheet" href="node_modules/driver.js/dist/driver.css">
+    <script src="node_modules/driver.js/dist/driver.js.iife.js"></script>
+    
+    <!-- App JS -->
+    <script src="js/app.js" defer></script>
+    
+    <!-- Built-in Tour System (no external dependencies) -->
+    <script src="js/tour.js" defer></script>
+</body>
+</html>
