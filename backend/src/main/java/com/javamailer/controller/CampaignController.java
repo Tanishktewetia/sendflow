@@ -21,33 +21,42 @@ import java.util.Map;
  * Handles campaign CRUD, execution, and statistics
  */
 @RestController
-@RequestMapping("/api/campaigns")
+@RequestMapping("/campaigns")
+@CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"}, allowCredentials = "true")
 @RequiredArgsConstructor
 public class CampaignController {
     
     private final CampaignService campaignService;
     
     /**
-     * Create new campaign
-     * POST /api/campaigns
+     * Save draft campaign (without email provider or recipients)
+     * POST /api/campaigns/draft/save
      */
-    @PostMapping
-    public ResponseEntity<?> createCampaign(@RequestBody Map<String, Object> request, Authentication authentication) {
+    @PostMapping("/draft/save")
+    public ResponseEntity<?> saveDraft(@RequestBody Map<String, Object> request, Authentication authentication) {
         try {
             JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
             Long userId = userDetails.getUserId();
             
-            Long emailProviderId = Long.parseLong(request.get("emailProviderId").toString());
-            String campaignName = (String) request.get("campaignName");
             String subject = (String) request.get("subject");
             String emailBody = (String) request.get("emailBody");
+            String campaignName = request.containsKey("campaignName") ? (String) request.get("campaignName") : "Draft Campaign";
             
-            Campaign campaign = campaignService.createCampaign(userId, emailProviderId, campaignName, subject, emailBody);
+            if (subject == null || subject.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Subject is required"));
+            }
+            if (emailBody == null || emailBody.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email body is required"));
+            }
+            
+            // Create campaign with DRAFT status (email provider is optional for drafts)
+            Campaign campaign = campaignService.createDraft(userId, campaignName, subject, emailBody);
             
             Map<String, Object> response = new HashMap<>();
-            response.put("message", "Campaign created successfully");
+            response.put("message", "Draft saved successfully");
             response.put("campaignId", campaign.getId());
             response.put("status", campaign.getStatus());
+            response.put("createdAt", campaign.getCreatedAt());
             
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
             

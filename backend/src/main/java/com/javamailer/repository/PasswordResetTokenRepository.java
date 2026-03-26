@@ -30,6 +30,12 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
     Optional<PasswordResetToken> findByUserIdAndIsUsedFalse(Long userId);
     
     /**
+     * Find the most recent tokens for a user (for throttle checking in resend)
+     * Orders by createdAt descending to get the latest token first
+     */
+    List<PasswordResetToken> findByUserIdOrderByCreatedAtDesc(Long userId);
+    
+    /**
      * Find token by token and validate it's unused and not expired
      */
     Optional<PasswordResetToken> findByTokenAndIsUsedFalseAndExpiresAtAfter(String token, LocalDateTime now);

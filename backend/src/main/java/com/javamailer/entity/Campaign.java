@@ -23,7 +23,7 @@ public class Campaign {
     @Column(name = "user_id", nullable = false)
     private Long userId;
     
-    @Column(name = "email_provider_id", nullable = false)
+    @Column(name = "email_provider_id")
     private Long emailProviderId;
     
     @Column(name = "campaign_name", nullable = false, length = 255)

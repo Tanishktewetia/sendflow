@@ -172,6 +172,17 @@
         </div>
     </footer>
 
+    <!-- Authentication & API Config -->
+    <script src="js/api-config.js"></script>
+    
+    <!-- Check if user is already logged in from landing page - redirect to app -->
+    <script>
+        // If user is already authenticated, redirect to app
+        if (typeof isAuthenticated === 'function' && isAuthenticated()) {
+            window.location.href = 'app.html';
+        }
+    </script>
+
     <script src="js/index.js"></script>
 </body>
 </html>

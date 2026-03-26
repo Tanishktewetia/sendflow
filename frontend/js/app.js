@@ -9,15 +9,53 @@ let campaignTimerIntervalId = null;   // Interval for timer display update
 let campaignElapsedTime = 0;          // Total elapsed time in milliseconds (preserved during pause)
 
 function checkAuth() {
-    const user = JSON.parse(localStorage.getItem('user') || 'null');
-    if (!user || !user.loggedIn) {
+    // Check if user has valid JWT token (primary authentication check)
+    const token = localStorage.getItem('jwt_token');
+    
+    if (!token || token === '' || token === 'null' || token === null) {
+        // Not authenticated - redirect to auth page
         window.location.href = 'auth.html';
+        return false;
     }
+    
+    return true;
+}
+
+/**
+ * Prevent back button navigation to landing page or auth page
+ * When user is logged in, they should stay in the app
+ */
+function preventBackNavigation() {
+    // Push a state to history to prevent going back to previous pages
+    window.history.pushState(null, null, window.location.href);
+    
+    // Listen for back button attempt
+    window.addEventListener('popstate', function(event) {
+        // If user is still authenticated, don't allow going back
+        if (isAuthenticated && isAuthenticated()) {
+            // Push the app page again to prevent going back
+            window.history.pushState(null, null, window.location.href);
+            
+            // Optional: Show a notification
+            console.log('Back navigation prevented - user is logged in');
+        } else {
+            // User is not authenticated, allow normal navigation
+            window.location.href = 'auth.html';
+        }
+    });
 }
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', function() {
-    checkAuth();
+    // Check authentication - if not authenticated, checkAuth() will redirect
+    if (!checkAuth()) {
+        return; // Stop initialization if not authenticated
+    }
+    
+    // Prevent back button navigation to landing/auth pages
+    preventBackNavigation();
+    
+    // User is authenticated, safe to initialize the app
     initilizeApp();
 });
 
@@ -26,6 +64,8 @@ function initilizeApp() {
     setupForms();
     setupNotifications();
     setupSettingsModal();
+    setupSecurityForm();
+    setupDeleteAccount();
     setupEmailSelectionPreference();
     loadSavedDraft();
     restoreLastSection();
@@ -36,6 +76,7 @@ function initilizeApp() {
     restoreSectionStates(); // Restore collapsed/expanded state of stats sections
     updateDashboardStats(); // Update dashboard statistics
     activityLog.updateDisplay(); // Display activity log
+    loadUserAvatarOnInit(); // Load avatar on page initialization
 }
 
 // SIDEBAR NAVIGATION
@@ -109,17 +150,14 @@ function setupProfileMenu() {
     const profileTooltip = document.getElementById('profileTooltip');
     const userNameDisplay = document.getElementById('userNameDisplay');
     
-    // Load user name
+    // Load user name - check multiple sources
     const user = JSON.parse(localStorage.getItem('user') || '{}');
-    if (user.name) {
-        userNameDisplay.textContent = user.name;
-    }
+    const userData = JSON.parse(localStorage.getItem('user_data') || '{}');
+    const displayName = user.name || user.fullName || userData.fullName || userData.name || 'User';
+    userNameDisplay.textContent = displayName;
     
-    // Load sidebar avatar
-    const profileImage = localStorage.getItem('profileImage');
-    if (profileImage) {
-        updateSidebarAvatar(profileImage);
-    }
+    // Load sidebar avatar from backend
+    loadSidebarAvatarFromBackend();
     
     // Toggle tooltip
     profileBtn.addEventListener('click', (e) => {
@@ -183,23 +221,23 @@ function setupProfileModal() {
     modalOverlay.addEventListener('click', closeProfileModal);
 
     // Handle image upload
-    profileImageInput.addEventListener('change', (e) => {
+    profileImageInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const imageData = event.target.result;
-                profileImage.src = imageData;
-                localStorage.setItem('profileImage', imageData);
-                // Update sidebar avatar
-                updateSidebarAvatar(imageData);
-            };
-            reader.readAsDataURL(file);
-        }
+        if (!file) return;
+
+        // Show preview immediately
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            profileImage.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        // Upload to backend
+        uploadAvatarToBackend(file);
     });
 
     // Save profile
-    profileEditForm.addEventListener('submit', (e) => {
+    profileEditForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const name = profileDisplayName.value.trim();
         
@@ -208,15 +246,57 @@ function setupProfileModal() {
             return;
         }
 
-        const user = JSON.parse(localStorage.getItem('user') || '{}');
-        user.name = name;
-        localStorage.setItem('user', JSON.stringify(user));
+        // Prepare update data
+        const updateData = {
+            fullName: name
+        };
+        
+        // Show loading state
+        const submitBtn = profileEditForm.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+        
+        // Send to backend
+        try {
+            const token = localStorage.getItem('jwt_token');
+            const response = await apiCall(`${API_BASE_URL}/users/profile`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            // Success - update locally
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            user.name = name;
+            user.fullName = name;
+            localStorage.setItem('user', JSON.stringify(user));
 
-        // Update profile button display
-        document.getElementById('userNameDisplay').textContent = name;
+            // Update profile button display
+            if (document.getElementById('userNameDisplay')) {
+                document.getElementById('userNameDisplay').textContent = name;
+            }
 
-        showNotification('Profile updated successfully', 'success');
-        closeProfileModal();
+            showNotification('Profile updated successfully', 'success');
+            closeProfileModal();
+        } catch (error) {
+            // Error - still update locally
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            user.name = name;
+            localStorage.setItem('user', JSON.stringify(user));
+            if (document.getElementById('userNameDisplay')) {
+                document.getElementById('userNameDisplay').textContent = name;
+            }
+            
+            showNotification('Profile updated (offline mode)', 'success');
+            closeProfileModal();
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
     });
 }
 
@@ -231,15 +311,123 @@ function closeProfileModal() {
     document.getElementById('profileModal').classList.remove('active');
 }
 
-function loadProfileData() {
+/**
+ * Upload avatar file to backend
+ */
+async function uploadAvatarToBackend(file) {
+    // Validate file
+    const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+    if (file.size > MAX_SIZE) {
+        showNotification('File size exceeds 5MB limit', 'error');
+        return;
+    }
+
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+        showNotification('Invalid image format. Use JPG, PNG, GIF, or WebP', 'error');
+        return;
+    }
+
+    try {
+        const token = localStorage.getItem('jwt_token');
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${API_BASE_URL}/users/avatar/upload`, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + token
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            showNotification(error.error || 'Avatar upload failed', 'error');
+            return;
+        }
+
+        const result = await response.json();
+        
+        // Store the storage path in user object
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        user.avatarStoragePath = result.avatarStoragePath;
+        localStorage.setItem('user', JSON.stringify(user));
+
+        // Update sidebar and profile modal with the new avatar
+        updateSidebarAvatar(result.publicUrl);
+        
+        const profileImageElement = document.getElementById('profileImage');
+        if (profileImageElement) {
+            profileImageElement.src = result.publicUrl;
+        }
+
+        showNotification('Avatar uploaded successfully', 'success');
+    } catch (error) {
+        console.error('Avatar upload error:', error);
+        showNotification('Failed to upload avatar', 'error');
+    }
+}
+
+async function loadProfileData() {
+    // Get user data from localStorage
+    const token = localStorage.getItem('jwt_token');
     const user = JSON.parse(localStorage.getItem('user') || '{}');
-    document.getElementById('profileDisplayName').value = user.name || '';
-    document.getElementById('profileEmail').value = user.email || '';
+    const userData = JSON.parse(localStorage.getItem('user_data') || '{}');
     
-    const profileImage = localStorage.getItem('profileImage');
-    if (profileImage) {
-        document.getElementById('profileImage').src = profileImage;
-        updateSidebarAvatar(profileImage);
+    // Load from localStorage (cached data) - try both keys
+    const displayName = user.name || user.fullName || userData.fullName || userData.name || '';
+    const email = user.email || userData.email || '';
+    
+    if (document.getElementById('profileDisplayName')) {
+        document.getElementById('profileDisplayName').value = displayName;
+    }
+    if (document.getElementById('profileEmail')) {
+        document.getElementById('profileEmail').value = email;
+    }
+    
+    // Fetch fresh user data from backend if token exists
+    if (token) {
+        try {
+            const response = await apiCall(`${API_BASE_URL}/users/profile`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': 'Bearer ' + token
+                }
+            });
+            
+            if (response) {
+                console.log('Profile data response:', response);  // Debug log
+                // Update form with fresh data
+                if (document.getElementById('profileDisplayName')) {
+                    document.getElementById('profileDisplayName').value = response.fullName || response.name || '';
+                }
+                if (document.getElementById('profileEmail')) {
+                    document.getElementById('profileEmail').value = response.email || '';
+                }
+                
+                // Update localStorage cache
+                const cachedUser = JSON.parse(localStorage.getItem('user') || '{}');
+                cachedUser.name = response.fullName || response.name;
+                cachedUser.email = response.email;
+                cachedUser.fullName = response.fullName;
+                cachedUser.avatarStoragePath = response.avatarStoragePath;
+                localStorage.setItem('user', JSON.stringify(cachedUser));
+
+                // Display avatar if available
+                if (response.avatarStoragePath) {
+                    const avatarUrl = `${SUPABASE_URL}/storage/v1/object/public/avatar_img/${response.avatarStoragePath}`;
+                    console.log('Loading avatar from profile data:', avatarUrl);  // Debug log
+                    const profileImageElement = document.getElementById('profileImage');
+                    if (profileImageElement) {
+                        profileImageElement.src = avatarUrl;
+                    }
+                    updateSidebarAvatar(avatarUrl);
+                }
+            }
+        } catch (error) {
+            console.log('Failed to load profile data:', error);
+        }
     }
 }
 
@@ -254,6 +442,64 @@ function updateSidebarAvatar(imageData) {
     } else {
         sidebarAvatarImg.style.display = 'none';
         sidebarAvatarIcon.style.display = 'block';
+    }
+}
+
+/**
+ * Load user avatar from backend on page initialization
+ */
+async function loadUserAvatarOnInit() {
+    try {
+        const token = localStorage.getItem('jwt_token');
+        if (!token) return;
+        
+        const response = await fetch(`${API_BASE_URL}/users/profile`, {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Avatar init response:', result);  // Debug log
+            if (result && result.avatarStoragePath) {
+                const avatarUrl = `${SUPABASE_URL}/storage/v1/object/public/avatar_img/${result.avatarStoragePath}`;
+                console.log('Loading avatar from init:', avatarUrl);  // Debug log
+                updateSidebarAvatar(avatarUrl);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load avatar on init:', error);
+    }
+}
+
+/**
+ * Load sidebar avatar from backend (called during profile menu setup)
+ */
+async function loadSidebarAvatarFromBackend() {
+    try {
+        const token = localStorage.getItem('jwt_token');
+        if (!token) return;
+        
+        const response = await fetch(`${API_BASE_URL}/users/profile`, {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Avatar sidebar response:', result);  // Debug log
+            if (result && result.avatarStoragePath) {
+                const avatarUrl = `${SUPABASE_URL}/storage/v1/object/public/avatar_img/${result.avatarStoragePath}`;
+                console.log('Loading sidebar avatar:', avatarUrl);  // Debug log
+                updateSidebarAvatar(avatarUrl);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load sidebar avatar:', error);
     }
 }
 
@@ -321,6 +567,17 @@ function setupForms() {
     
     // Send To selection
     document.getElementById('sendToOption')?.addEventListener('change', (e) => {
+        const queue = getCSVQueue();
+        const csvAvailable = queue.some(q => q.status === 'pending' || q.status === 'processing');
+        
+        // If custom range is selected but no CSV is available, show warning and reset to 'all'
+        if (e.target.value === 'range' && !csvAvailable) {
+            showNotification('❌ Please upload a CSV file first before using custom range', 'warning');
+            e.target.value = 'all';
+            document.getElementById('rangeInputs').style.display = 'none';
+            return;
+        }
+        
         const rangeInputs = document.getElementById('rangeInputs');
         rangeInputs.style.display = e.target.value === 'range' ? 'flex' : 'none';
         updatePreview();
@@ -346,6 +603,9 @@ function setupForms() {
     
     // CSV upload
     setupCSVUpload();
+    
+    // Load CSV files from backend (sync with database, not just localStorage)
+    loadCSVQueueFromBackend();
 
     // Save Draft button
     document.getElementById('saveDraftBtn')?.addEventListener('click', handleSaveDraft);
@@ -903,47 +1163,172 @@ function resetStuckCSV() {
     showNotification('✅ Stuck CSV reset and moved back to pending', 'success');
 }
 
-function handleSaveDraft() {
+async function handleSaveDraft() {
     const subject = document.getElementById('emailSubject')?.value?.trim();
     const body = document.getElementById('emailBody')?.value?.trim();
+    const saveDraftBtn = document.getElementById('saveDraftBtn');
+    const originalText = saveDraftBtn?.textContent;
 
     if (!subject || !body) {
         showNotification('Please fill in subject and body before saving', 'error');
         return;
     }
-
-    const draft = {
-        subject,
-        body,
-        sendTo: document.getElementById('sendToOption')?.value || 'all',
-        rangeFrom: document.getElementById('rangeFrom')?.value || '',
-        rangeTo: document.getElementById('rangeTo')?.value || '',
-        savedAt: new Date().toLocaleString()
-    };
-
-    localStorage.setItem('emailDraft', JSON.stringify(draft));
-    showNotification('Email draft saved successfully', 'success');
-    updateDashboardStats(); // Update dashboard instantly when draft is saved
-}
-
-function loadSavedDraft() {
-    const savedDraft = localStorage.getItem('emailDraft');
-    if (!savedDraft) return;
+    
+    // ============ UPDATE BUTTON STATE - SHOW LOADING ============
+    if (saveDraftBtn) {
+        saveDraftBtn.textContent = '💾 Saving...';
+        saveDraftBtn.disabled = true;
+    }
 
     try {
-        const draft = JSON.parse(savedDraft);
+        // Get JWT token
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('❌ Not logged in. Please login first.', 'error');
+            
+            // ============ RESTORE BUTTON STATE ============
+            if (saveDraftBtn) {
+                saveDraftBtn.textContent = originalText;
+                saveDraftBtn.disabled = false;
+            }
+            
+            window.location.href = 'auth.html';
+            return;
+        }
+
+        // Prepare draft data
+        const draftData = {
+            campaignName: subject.substring(0, 50) + (subject.length > 50 ? '...' : ''),
+            subject: subject,
+            emailBody: body
+        };
+
+        // Check if updating existing draft or creating new one
+        const lastDraftId = localStorage.getItem('lastDraftId');
+        let response;
+        let isUpdate = false;
+
+        if (lastDraftId && lastDraftId !== 'null' && lastDraftId !== '') {
+            // ============ UPDATE EXISTING DRAFT ============
+            console.log('[DEBUG] Updating existing draft - ID:', lastDraftId);
+            response = await fetch(`${API_BASE_URL}/campaigns/${lastDraftId}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(draftData)
+            });
+            isUpdate = true;
+        } else {
+            // ============ CREATE NEW DRAFT ============
+            console.log('[DEBUG] Creating new draft');
+            response = await fetch(`${API_BASE_URL}/campaigns/draft/save`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(draftData)
+            });
+        }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMessage = errorData.error || 'Failed to save draft';
+            console.error('[DEBUG] Draft save failed:', errorMessage);
+            
+            // ============ RESTORE BUTTON STATE ============
+            if (saveDraftBtn) {
+                saveDraftBtn.textContent = originalText;
+                saveDraftBtn.disabled = false;
+            }
+            
+            showNotification('❌ Failed to save draft: ' + errorMessage, 'error');
+            return;
+        }
+
+        const backendResponse = await response.json();
+        console.log('[DEBUG] Draft saved successfully:', backendResponse);
+
+        // Store draft ID for future updates
+        const draftId = backendResponse.campaignId || lastDraftId;
+        localStorage.setItem('lastDraftId', draftId?.toString());
+
+        // Show success message
+        const displaySubject = subject.substring(0, 30) + (subject.length > 30 ? '...' : '');
+        const actionText = isUpdate ? 'updated' : 'saved';
+        showNotification(`✅ Draft ${actionText}: "${displaySubject}"`, 'success', 3000);
+        updateDashboardStats();
         
+    } catch (error) {
+        console.error('[DEBUG] Draft save error:', error);
+        
+        // ============ RESTORE BUTTON STATE ============
+        if (saveDraftBtn) {
+            saveDraftBtn.textContent = originalText;
+            saveDraftBtn.disabled = false;
+        }
+        
+        showNotification('❌ Failed to save draft: ' + error.message, 'error');
+    } finally {
+        // ============ ENSURE BUTTON IS RESTORED ============
+        if (saveDraftBtn && saveDraftBtn.textContent === '💾 Saving...') {
+            saveDraftBtn.textContent = originalText;
+            saveDraftBtn.disabled = false;
+        }
+    }
+}
+
+async function loadSavedDraft() {
+    try {
+        // Get JWT token
+        const token = getJwtToken();
+        if (!token) return; // User not logged in yet
+
+        // Fetch campaigns from backend
+        console.log('[DEBUG] Loading saved draft from backend...');
+        const response = await fetch(`${API_BASE_URL}/campaigns`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            console.error('Failed to fetch campaigns');
+            return;
+        }
+
+        const data = await response.json();
+        const campaigns = data.campaigns || [];
+        
+        // Find the most recent DRAFT campaign
+        const draftCampaigns = campaigns.filter(c => c.status === 'DRAFT');
+        if (draftCampaigns.length === 0) {
+            console.log('[DEBUG] No draft campaigns found');
+            return;
+        }
+
+        // Sort by createdAt descending to get the most recent
+        draftCampaigns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        const draft = draftCampaigns[0];
+
+        console.log('[DEBUG] Found draft:', draft);
+
+        // ============ STORE DRAFT ID FOR EDITING ============
+        localStorage.setItem('lastDraftId', draft.id?.toString());
+        console.log('[DEBUG] Set lastDraftId for editing:', draft.id);
+
+        // Load draft into form
         const subjectInput = document.getElementById('emailSubject');
         const bodyInput = document.getElementById('emailBody');
         const sendToSelect = document.getElementById('sendToOption');
-        const rangeFromInput = document.getElementById('rangeFrom');
-        const rangeToInput = document.getElementById('rangeTo');
 
         if (subjectInput) subjectInput.value = draft.subject || '';
-        if (bodyInput) bodyInput.value = draft.body || '';
-        if (sendToSelect) sendToSelect.value = draft.sendTo || 'all';
-        if (rangeFromInput) rangeFromInput.value = draft.rangeFrom || '';
-        if (rangeToInput) rangeToInput.value = draft.rangeTo || '';
+        if (bodyInput) bodyInput.value = draft.emailBody || '';
+        if (sendToSelect) sendToSelect.value = 'all'; // Default to all recipients
 
         // Update preview with loaded draft
         updatePreview();
@@ -954,15 +1339,56 @@ function loadSavedDraft() {
             rangeInputs.style.display = 'flex';
         }
         
+        // Show notification about loaded draft
+        const createdTime = new Date(draft.createdAt).toLocaleString();
+        showNotification(`📋 Draft loaded from database: "${draft.subject.substring(0, 30)}..." (Saved: ${createdTime})`, 'info', 3000);
+        
         // Update dashboard instantly when draft is loaded
         updateDashboardStats();
-    } catch (e) {
-        console.error('Error loading saved draft:', e);
+    } catch (error) {
+        console.error('[DEBUG] Error loading saved draft:', error);
+        // Silently fail - don't block app loading
     }
 }
 
+/**
+ * Logout function - Clear user session and redirect to auth
+ * This function is available globally for the logout button
+ */
 function handleLogout() {
+    // Clear all authentication data
+    if (typeof clearAuthData === 'function') {
+        clearAuthData();
+    }
+    
+    // Clear all user data
     localStorage.removeItem('user');
+    localStorage.removeItem('jwt_token');
+    localStorage.removeItem('jwt_refresh_token');
+    localStorage.removeItem('user_data');
+    localStorage.removeItem('user_id');
+    localStorage.removeItem('profileImage');
+    localStorage.removeItem('emailProviders');
+    localStorage.removeItem('selectedEmailProvider');
+    localStorage.removeItem('emailSelectionPreference');
+    localStorage.removeItem('emailDraft');
+    localStorage.removeItem('csvQueue');
+    localStorage.removeItem('recipients');
+    localStorage.removeItem('campaigns');
+    localStorage.removeItem('currentSessionLogs');
+    localStorage.removeItem('lifetimeStats');
+    localStorage.removeItem('dashboardActivityLog');
+    localStorage.removeItem('lastSection');
+    
+    // Clear campaign state
+    localStorage.removeItem('currentProcessingCSVId');
+    localStorage.removeItem('csvProgress');
+    localStorage.removeItem('campaignPaused');
+    localStorage.removeItem('campaignPausedRow');
+    localStorage.removeItem('campaignEmailProvider');
+    localStorage.removeItem('campaignElapsedTimeMS');
+    
+    // Redirect to auth page
     window.location.href = 'auth.html';
 }
 
@@ -1014,7 +1440,7 @@ function saveCSVQueue(queue) {
     updateDashboardStats();
 }
 
-function addToCSVQueue(name, recipients) {
+function addToCSVQueue(name, recipients, uploadId = null) {
     const queue = getCSVQueue();
     
     if (queue.length >= 5) {
@@ -1023,13 +1449,14 @@ function addToCSVQueue(name, recipients) {
     }
 
     const csvItem = {
-        id: Date.now(),
+        id: uploadId || Date.now(), // Use real database ID if provided, fallback to timestamp
         name: name,
         recipients: recipients,
         recipientCount: recipients.length,
         status: 'pending',
         uploadedAt: new Date().toLocaleString(),
-        completedAt: null
+        completedAt: null,
+        databaseId: uploadId // Store both for clarity
     };
 
     queue.push(csvItem);
@@ -1046,7 +1473,7 @@ function addToCSVQueue(name, recipients) {
     return true;
 }
 
-function removeFromCSVQueue(id) {
+async function removeFromCSVQueue(id) {
     const queue = getCSVQueue();
     const item = queue.find(q => q.id === id);
 
@@ -1056,6 +1483,68 @@ function removeFromCSVQueue(id) {
         return false;
     }
 
+    // ============ UPDATE BUTTON STATE - SHOW LOADING ============
+    const deleteBtn = document.getElementById(`deleteBtn-${id}`);
+    const deleteIcon = document.getElementById(`deleteIcon-${id}`);
+    if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteIcon.className = 'fas fa-spinner fa-spin'; // Show spinner
+    }
+
+    // ============ DELETE FROM BACKEND FIRST ============
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('❌ Not logged in. Please login first.', 'error');
+            if (deleteBtn) {
+                deleteBtn.disabled = false;
+                deleteIcon.className = 'fas fa-trash'; // Restore icon
+            }
+            window.location.href = 'auth.html';
+            return false;
+        }
+
+        console.log('[DEBUG] Deleting CSV from backend - ID:', id, 'Name:', item?.name);
+        const response = await fetch(API_ENDPOINTS.CSV_DELETE(id), {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMessage = errorData.error || `Delete failed with status ${response.status}`;
+            console.error('[DEBUG] Backend delete failed:', errorMessage);
+            
+            // ============ RESTORE BUTTON STATE ON ERROR ============
+            if (deleteBtn) {
+                deleteBtn.disabled = false;
+                deleteIcon.className = 'fas fa-trash'; // Restore icon
+            }
+            
+            showNotification('❌ Delete failed: ' + errorMessage, 'error');
+            return false;
+        }
+
+        const backendResponse = await response.json();
+        console.log('[DEBUG] Backend delete successful:', backendResponse);
+        
+    } catch (error) {
+        console.error('[DEBUG] Delete error:', error);
+        
+        // ============ RESTORE BUTTON STATE ON ERROR ============
+        if (deleteBtn) {
+            deleteBtn.disabled = false;
+            deleteIcon.className = 'fas fa-trash'; // Restore icon
+        }
+        
+        showNotification('❌ Delete failed: ' + error.message, 'error');
+        return false;
+    }
+
+    // ============ BACKEND DELETE SUCCESSFUL - NOW REMOVE FROM LOCAL QUEUE ============
     const newQueue = queue.filter(q => q.id !== id);
     saveCSVQueue(newQueue);
     
@@ -1063,7 +1552,8 @@ function removeFromCSVQueue(id) {
     updateCSVQueueDisplay();
     updateDashboardStats();
     
-    showNotification('CSV removed from queue', 'success');
+    console.log('[DEBUG] CSV removed from local queue - ID:', id);
+    showNotification('✅ CSV deleted from database and storage', 'success');
     return true;
 }
 
@@ -1154,10 +1644,10 @@ function updateCSVQueueDisplay() {
                         <i class="fas fa-redo"></i> Reprocess
                     </button>
                 ` : `
-                    <button class="btn btn-secondary" onclick="removeFromCSVQueue(${item.id})" 
+                    <button id="deleteBtn-${item.id}" class="btn btn-secondary" onclick="removeFromCSVQueue(${item.id})" 
                             ${item.status === 'processing' ? 'disabled title="Cannot remove while processing"' : ''}
                             title="Remove from queue">
-                        <i class="fas fa-trash"></i>
+                        <i id="deleteIcon-${item.id}" class="fas fa-trash"></i>
                     </button>
                 `}
             </div>
@@ -1175,6 +1665,62 @@ function loadCSVQueue() {
             localStorage.setItem('recipients', JSON.stringify(firstPending.recipients));
             updateRangeInputs(firstPending.recipientCount);
         }
+    }
+}
+
+/**
+ * Load CSV uploads from backend and populate localStorage queue
+ * Called on app initialization to sync with database
+ */
+async function loadCSVQueueFromBackend() {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            console.log('[DEBUG] No token, skipping backend CSV load');
+            return;
+        }
+
+        console.log('[DEBUG] Fetching CSVs from backend...');
+        const response = await fetch(API_ENDPOINTS.CSV_LIST, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            console.warn('[DEBUG] Failed to fetch CSVs from backend:', response.status);
+            return;
+        }
+
+        const data = await response.json();
+        console.log('[DEBUG] Backend CSVs:', data);
+
+        // Convert backend format to queue format
+        if (data.uploads && Array.isArray(data.uploads)) {
+            const queue = data.uploads.map(csv => ({
+                id: csv.id,
+                name: csv.fileName,
+                databaseId: csv.id,
+                status: 'pending', // Default status for display
+                uploadedAt: new Date(csv.uploadedAt).toLocaleString(),
+                completedAt: null,
+                recipients: [], // Backend doesn't send recipients back, that's fine
+                recipientCount: csv.validRows || 0,
+                totalRows: csv.totalRows || 0,
+                validRows: csv.validRows || 0,
+                invalidRows: csv.invalidRows || 0
+            }));
+
+            console.log('[DEBUG] Loaded', queue.length, 'CSVs from backend');
+            saveCSVQueue(queue);
+            updateCSVQueueDisplay();
+            updateDashboardStats();
+        }
+    } catch (error) {
+        console.error('[DEBUG] Error loading CSVs from backend:', error);
+        // Silently fail - use localStorage as fallback
     }
 }
 
@@ -1677,7 +2223,7 @@ function showPreview(lines) {
     }, 100);
 }
 
-function confirmUpload() {
+async function confirmUpload() {
     // Check if a file has been parsed and is pending
     if (!pendingCSVData.fileName || pendingCSVData.recipients.length === 0) {
         showNotification('❌ Please select and preview a CSV file first', 'error');
@@ -1691,20 +2237,102 @@ function confirmUpload() {
         return;
     }
 
-    // NOW add to queue
-    if (addToCSVQueue(pendingCSVData.fileName, pendingCSVData.recipients)) {
-        showNotification('✅ CSV added to queue successfully', 'success');
+    // ============ UPDATE BUTTON STATE - SHOW LOADING ============
+    const confirmBtn = document.getElementById('confirmUploadBtn');
+    const originalText = confirmBtn.textContent;
+    confirmBtn.textContent = '⏳ Uploading...';
+    confirmBtn.disabled = true;
+
+    // ============ UPLOAD TO BACKEND FIRST ============
+    try {
+        // Get JWT token
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('❌ Not logged in. Please login first.', 'error');
+            
+            // ============ RESTORE BUTTON STATE ============
+            confirmBtn.textContent = originalText;
+            confirmBtn.disabled = false;
+            
+            window.location.href = 'auth.html';
+            return;
+        }
+
+        // Reconstruct CSV file from parsed data
+        const headers = ['name', 'email', 'company', 'customField1', 'customField2'];
+        const csvLines = [headers.join(',')];
+        pendingCSVData.recipients.forEach(recipient => {
+            const row = headers.map(h => recipient[h] || '').join(',');
+            csvLines.push(row);
+        });
+        const csvContent = csvLines.join('\n');
+        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
+
+        // Create FormData for upload
+        const formData = new FormData();
+        formData.append('file', csvBlob, pendingCSVData.fileName);
+        formData.append('recipients', JSON.stringify(pendingCSVData.recipients));
+
+        // Send to backend
+        console.log('[DEBUG] Uploading CSV to backend:', pendingCSVData.fileName);
+        const response = await fetch(API_ENDPOINTS.EMAIL_UPLOAD_CSV, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const errorMessage = errorData.error || `Upload failed with status ${response.status}`;
+            console.error('[DEBUG] Backend upload failed:', errorMessage);
+            
+            // ============ RESTORE BUTTON STATE ON ERROR ============
+            confirmBtn.textContent = originalText;
+            confirmBtn.disabled = false;
+            
+            if (errorMessage.includes('Maximum 5 CSV files')) {
+                showNotification('❌ Maximum 5 CSV files allowed. Please delete some files first.', 'error');
+            } else if (errorMessage.includes('10MB')) {
+                showNotification('❌ File size exceeds 10MB limit', 'error');
+            } else {
+                showNotification('❌ Backend upload failed: ' + errorMessage, 'error');
+            }
+            return;
+        }
+
+        const backendResponse = await response.json();
+        console.log('[DEBUG] Backend upload successful:', backendResponse);
         
-        // Clear pending data
-        pendingCSVData = {
-            fileName: '',
-            recipients: [],
-            lines: []
-        };
+        // ============ BACKEND SUCCESSFUL - NOW ADD TO LOCAL QUEUE ============
+        // This keeps a local cache for the UI to work offline
+        // IMPORTANT: Use the uploadId from backend, not a timestamp!
+        if (addToCSVQueue(pendingCSVData.fileName, pendingCSVData.recipients, backendResponse.uploadId)) {
+            showNotification('✅ CSV uploaded and added to queue successfully', 'success');
+            
+            // Clear pending data
+            pendingCSVData = {
+                fileName: '',
+                recipients: [],
+                lines: []
+            };
+            
+            // Reset upload form
+            resetUpload();
+            
+            // Update displays
+            updateCSVQueueDisplay();
+            updateDashboardStats();
+        }
+    } catch (error) {
+        console.error('[DEBUG] Upload error:', error);
         
-        resetUpload();
-    } else {
-        showNotification('❌ Failed to add CSV to queue', 'error');
+        // ============ RESTORE BUTTON STATE ON ERROR ============
+        confirmBtn.textContent = originalText;
+        confirmBtn.disabled = false;
+        
+        showNotification('❌ Upload failed: ' + error.message, 'error');
     }
 }
 
@@ -1712,6 +2340,13 @@ function resetUpload() {
     document.getElementById('uploadForm').style.display = 'block';
     document.getElementById('filePreview').style.display = 'none';
     document.getElementById('csvFile').value = '';
+    
+    // Reset button state
+    const confirmBtn = document.getElementById('confirmUploadBtn');
+    if (confirmBtn) {
+        confirmBtn.textContent = 'Confirm Upload';
+        confirmBtn.disabled = false;
+    }
     
     // Clear pending data
     pendingCSVData = {
@@ -1831,6 +2466,9 @@ function openSettingsModal() {
     settingsOverlay?.classList.add('active');
     document.body.style.overflow = 'hidden';
     
+    // Load profile data into settings form
+    loadSettingsProfileData();
+    
     // Reload email providers to show current lock state
     loadEmailProviders();
 }
@@ -1844,6 +2482,169 @@ function closeSettingsModal() {
     
     // Update dashboard stat when settings modal closes
     updateMailProviderStat();
+}
+
+function loadSettingsProfileData() {
+    // Get user data from localStorage - try both 'user' and 'user_data' keys
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const userData = JSON.parse(localStorage.getItem('user_data') || '{}');
+    const displayName = user.name || user.fullName || userData.fullName || userData.name || '';
+    const email = user.email || userData.email || '';
+    const token = localStorage.getItem('jwt_token');
+    
+    // Load from localStorage first
+    if (document.getElementById('settingsProfileDisplayName')) {
+        document.getElementById('settingsProfileDisplayName').value = displayName;
+    }
+    if (document.getElementById('settingsProfileEmail')) {
+        document.getElementById('settingsProfileEmail').value = email;
+    }
+    
+    // Fetch fresh user data from backend if token exists
+    if (token) {
+        (async () => {
+            try {
+                const response = await apiCall(`${API_BASE_URL}/users/profile`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + token
+                    }
+                });
+                
+                if (response && response.data) {
+                    const freshData = response.data;
+                    if (document.getElementById('settingsProfileDisplayName')) {
+                        document.getElementById('settingsProfileDisplayName').value = freshData.fullName || freshData.name || '';
+                    }
+                    if (document.getElementById('settingsProfileEmail')) {
+                        document.getElementById('settingsProfileEmail').value = freshData.email || '';
+                    }
+                }
+            } catch (error) {
+                console.log('Using cached profile data');
+            }
+        })();
+    }
+}
+
+/**
+ * Setup avatar upload handlers
+ */
+function setupAvatarUpload() {
+    const avatarInput = document.getElementById('avatarInput');
+    const avatarUploadBtn = document.getElementById('avatarUploadBtn');
+    const avatarDeleteBtn = document.getElementById('avatarDeleteBtn');
+    const avatarPreview = document.getElementById('avatarPreview');
+    const avatarPlaceholder = document.getElementById('avatarPlaceholder');
+    
+    if (!avatarInput || !avatarUploadBtn) return;
+    
+    // Trigger file input when button clicked
+    avatarUploadBtn.addEventListener('click', () => {
+        avatarInput.click();
+    });
+    
+    // Handle file selection
+    avatarInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // Show preview
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            avatarPreview.src = event.target.result;
+            avatarPreview.style.display = 'block';
+            avatarPlaceholder.style.display = 'none';
+            avatarDeleteBtn.style.display = 'inline-block';
+        };
+        reader.readAsDataURL(file);
+        
+        // Upload to server
+        await uploadAvatarToServer(file);
+    });
+    
+    // Handle delete
+    avatarDeleteBtn.addEventListener('click', async () => {
+        if (!confirm('Delete your avatar?')) return;
+        await deleteAvatarFromServer();
+    });
+}
+
+/**
+ * Upload avatar to server
+ */
+async function uploadAvatarToServer(file) {
+    try {
+        const token = localStorage.getItem('jwt_token');
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE_URL}/users/avatar/upload`, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + token
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Avatar upload failed');
+        }
+        
+        const data = await response.json();
+        showNotification('Avatar uploaded successfully!', 'success');
+        
+        // Update sidebar avatar
+        if (data.publicUrl) {
+            updateSidebarAvatar(data.publicUrl);
+        }
+        
+    } catch (error) {
+        showNotification('Avatar upload failed: ' + error.message, 'error');
+        console.error('Avatar upload error:', error);
+    }
+}
+
+/**
+ * Delete avatar from server
+ */
+async function deleteAvatarFromServer() {
+    try {
+        const token = localStorage.getItem('jwt_token');
+        
+        const response = await fetch(`${API_BASE_URL}/users/avatar`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Avatar delete failed');
+        }
+        
+        const avatarInput = document.getElementById('avatarInput');
+        const avatarPreview = document.getElementById('avatarPreview');
+        const avatarPlaceholder = document.getElementById('avatarPlaceholder');
+        const avatarDeleteBtn = document.getElementById('avatarDeleteBtn');
+        
+        // Reset UI
+        avatarInput.value = '';
+        avatarPreview.style.display = 'none';
+        avatarPlaceholder.style.display = 'flex';
+        avatarDeleteBtn.style.display = 'none';
+        
+        // Reset sidebar avatar
+        updateSidebarAvatar(null);
+        
+        showNotification('Avatar deleted successfully', 'success');
+        
+    } catch (error) {
+        showNotification('Avatar delete failed: ' + error.message, 'error');
+        console.error('Avatar delete error:', error);
+    }
 }
 
 function switchSettingsSection(section) {
@@ -1887,6 +2688,12 @@ function setupEmailProviderForm() {
     addProviderBtn?.addEventListener('click', (e) => {
         e.preventDefault();
         handleAddProvider();
+    });
+    
+    const cancelBtn = document.getElementById('cancelVerificationBtn');
+    cancelBtn?.addEventListener('click', (e) => {
+        e.preventDefault();
+        handleCancelVerification();
     });
 }
 
@@ -1957,35 +2764,70 @@ function handleVerifyProvider() {
     verifyProviderWithBackend(provider);
 }
 
-function verifyProviderWithBackend(provider) {
-    // Backend API Integration Point:
-    // Replace the setTimeout below with actual fetch call to your backend
-    // 
-    // Example:
-    // fetch('/api/email-provider/verify', {
-    //     method: 'POST',
-    //     headers: { 'Content-Type': 'application/json' },
-    //     body: JSON.stringify(provider)
-    // })
-    // .then(res => res.json())
-    // .then(data => {
-    //     if (data.verified) {
-    //         showVerificationSuccess(provider);
-    //     } else {
-    //         showVerificationFailed(data.message || 'Test email could not be sent');
-    //     }
-    // })
-    // .catch(err => showVerificationFailed(err.message));
+async function verifyProviderWithBackend(provider) {
+    showNotification('Verifying email provider credentials...', 'info');
     
-    showNotification('Sending verification email...', 'info');
+    // Determine which endpoint to call based on provider type
+    let endpoint;
+    let requestBody;
     
-    // Simulated backend verification (2-second delay)
-    // This will be replaced with actual backend call above
-    setTimeout(() => {
-        // For demonstration: always succeed
-        // In production: response depends on backend verification
-        showVerificationSuccess(provider);
-    }, 2000);
+    if (provider.type === 'smtp') {
+        endpoint = `${API_BASE_URL}/email-providers/verify/smtp`;
+        requestBody = {
+            name: provider.name,
+            email: provider.email,
+            host: 'smtp.gmail.com',
+            port: 587,
+            username: provider.email,
+            password: provider.credentials.password
+        };
+    } else if (provider.type === 'resend') {
+        endpoint = `${API_BASE_URL}/email-providers/verify/resend`;
+        requestBody = {
+            name: provider.name,
+            email: provider.email,
+            apiKey: provider.credentials.apiKey
+        };
+    } else if (provider.type === 'outlook') {
+        endpoint = `${API_BASE_URL}/email-providers/verify/outlook`;
+        requestBody = {
+            name: provider.name,
+            email: provider.email,
+            appPassword: provider.credentials.password
+        };
+    } else {
+        showVerificationFailed('Unknown provider type');
+        return;
+    }
+    
+    try {
+        const token = localStorage.getItem('jwt_token');
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + token,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.verified) {
+            // Store verification token for later use when adding provider
+            window.verificationToken = data.verificationToken;
+            showVerificationSuccess(provider);
+            console.log('[DEBUG] Email provider verification successful:', data.message);
+        } else {
+            const errorMsg = data?.error || data?.message || 'Failed to verify provider credentials';
+            showVerificationFailed(errorMsg);
+            console.log('[DEBUG] Email provider verification failed:', errorMsg);
+        }
+    } catch (error) {
+        const errorMsg = error.message || 'Network error - unable to verify provider';
+        showVerificationFailed(errorMsg);
+        console.error('[ERROR] Provider verification failed:', error);
+    }
 }
 
 function showVerificationPending() {
@@ -1993,14 +2835,16 @@ function showVerificationPending() {
     const statusMessage = document.getElementById('verificationMessage');
     const verifyBtn = document.getElementById('verifyProviderBtn');
     const addProviderBtn = document.getElementById('addProviderBtn');
+    const cancelBtn = document.getElementById('cancelVerificationBtn');
     
     statusDiv.style.display = 'block';
     statusDiv.className = 'verification-status pending';
     statusMessage.textContent = '⏳ Verification Pending - Sending test email to your address...';
     
     verifyBtn.disabled = true;
-    verifyBtn.textContent = 'Verifying...';
+    verifyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
     addProviderBtn.style.display = 'none';
+    cancelBtn.style.display = 'block';
 }
 
 function showVerificationSuccess(provider) {
@@ -2008,16 +2852,18 @@ function showVerificationSuccess(provider) {
     const statusMessage = document.getElementById('verificationMessage');
     const verifyBtn = document.getElementById('verifyProviderBtn');
     const addProviderBtn = document.getElementById('addProviderBtn');
+    const cancelBtn = document.getElementById('cancelVerificationBtn');
     
     statusDiv.style.display = 'block';
     statusDiv.className = 'verification-status verified';
     statusMessage.innerHTML = `✅ Verified - Test email sent to <strong>${provider.email}</strong>. You can now add this provider.`;
     
     verifyBtn.disabled = true;
-    verifyBtn.textContent = 'Verified';
+    verifyBtn.innerHTML = '<i class="fas fa-check"></i> Verified';
     addProviderBtn.style.display = 'block';
+    cancelBtn.style.display = 'block';
     
-    // Store verified provider temporarily
+    // Store verified provider temporarily (only saved to DB when Add Provider is clicked)
     window.verifiedProvider = provider;
     
     showNotification('Credentials verified successfully!', 'success');
@@ -2028,14 +2874,16 @@ function showVerificationFailed(message = 'Verification failed') {
     const statusMessage = document.getElementById('verificationMessage');
     const verifyBtn = document.getElementById('verifyProviderBtn');
     const addProviderBtn = document.getElementById('addProviderBtn');
+    const cancelBtn = document.getElementById('cancelVerificationBtn');
     
     statusDiv.style.display = 'block';
     statusDiv.className = 'verification-status failed';
     statusMessage.textContent = `❌ ${message} - Please check your credentials and try again.`;
     
     verifyBtn.disabled = false;
-    verifyBtn.textContent = 'Verify Now';
+    verifyBtn.innerHTML = '<i class="fas fa-redo"></i> Try Again';
     addProviderBtn.style.display = 'none';
+    cancelBtn.style.display = 'block';
     
     showNotification(message, 'error');
 }
@@ -2044,13 +2892,16 @@ function resetVerificationState() {
     const statusDiv = document.getElementById('verificationStatus');
     const verifyBtn = document.getElementById('verifyProviderBtn');
     const addProviderBtn = document.getElementById('addProviderBtn');
+    const cancelBtn = document.getElementById('cancelVerificationBtn');
     
     statusDiv.style.display = 'none';
     verifyBtn.disabled = false;
-    verifyBtn.textContent = 'Verify Now';
+    verifyBtn.innerHTML = '<i class="fas fa-check-circle"></i> Verify Now';
     addProviderBtn.style.display = 'none';
+    cancelBtn.style.display = 'none';
     
     window.verifiedProvider = null;
+    window.verificationToken = null;
 }
 
 function resetEmailProviderForm() {
@@ -2070,41 +2921,100 @@ function resetEmailProviderForm() {
     resetVerificationState();
 }
 
-function handleAddProvider() {
+async function handleAddProvider() {
     const verifiedProvider = window.verifiedProvider;
+    const verificationToken = window.verificationToken;
     
     if (!verifiedProvider) {
         showNotification('Please verify credentials first', 'error');
         return;
     }
     
-    // Add verified ID
-    verifiedProvider.id = Date.now();
-    verifiedProvider.verified = true;
-    
-    // Get existing providers
-    let providers = JSON.parse(localStorage.getItem('emailProviders') || '[]');
-    
-    // Check if email already exists
-    if (providers.some(p => p.email === verifiedProvider.email)) {
-        showNotification('Email already added', 'error');
+    if (!verificationToken) {
+        showNotification('Verification token missing. Please verify again.', 'error');
         return;
     }
     
-    // Add provider
-    providers.push(verifiedProvider);
-    localStorage.setItem('emailProviders', JSON.stringify(providers));
+    // Show loading state
+    const addBtn = document.getElementById('addProviderBtn');
+    const originalText = addBtn.textContent;
+    addBtn.disabled = true;
+    addBtn.textContent = '⏳ Adding...';
     
-    showNotification(`${verifiedProvider.name} added successfully!`, 'success');
+    // Prepare provider data for confirmation
+    const providerData = {
+        providerType: verifiedProvider.type.toUpperCase(),
+        displayName: verifiedProvider.name,
+        fromEmail: verifiedProvider.email,
+        fromName: verifiedProvider.name,
+        encryptedConfig: verifiedProvider.credentials,  // Send as Map, not JSON string
+        verificationToken: verificationToken
+    };
     
-    // Reset form
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('Not logged in. Please login first.', 'error');
+            addBtn.disabled = false;
+            addBtn.textContent = originalText;
+            return;
+        }
+        
+        // Call confirm endpoint with verification token
+        const response = await fetch(`${API_BASE_URL}/email-providers/confirm`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(providerData)
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to add provider');
+        }
+        
+        const result = await response.json();
+        
+        // Add to local cache for quick display
+        verifiedProvider.id = result.providerId;
+        let providers = JSON.parse(localStorage.getItem('emailProviders') || '[]');
+        providers.push(verifiedProvider);
+        localStorage.setItem('emailProviders', JSON.stringify(providers));
+        
+        // If this is the first provider, set it as default
+        if (providers.length === 1) {
+            localStorage.setItem('selectedEmailProvider', verifiedProvider.id.toString());
+            console.log('[DEBUG] First provider added, setting as default - ID:', verifiedProvider.id);
+        }
+        
+        showNotification(`✅ ${verifiedProvider.name} added and verified successfully!`, 'success');
+        
+        // Reset form and reload
+        resetEmailProviderForm();
+        resetVerificationState();
+        loadEmailProviders();
+        updateMailProviderStat();
+        
+    } catch (error) {
+        console.error('[DEBUG] Add provider error:', error);
+        showNotification('❌ Failed to add provider: ' + error.message, 'error');
+    } finally {
+        // Reset button
+        addBtn.disabled = false;
+        addBtn.textContent = originalText;
+    }
+}
+
+/**
+ * Cancel email provider verification
+ * Closes the modal and resets the form
+ */
+function handleCancelVerification() {
+    resetVerificationState();
     resetEmailProviderForm();
-    
-    // Reload provider list
-    loadEmailProviders();
-    
-    // Update dashboard stat in real-time
-    updateMailProviderStat();
+    showNotification('Verification cancelled', 'info');
 }
 
 function loadEmailProviders() {
@@ -2159,7 +3069,7 @@ function loadEmailProviders() {
                     <input type="radio" name="defaultProvider" value="${provider.id}" 
                            ${isDefault ? 'checked' : ''} ${campaignActive ? 'disabled' : ''}>
                 </div>
-                <button class="delete-btn" onclick="deleteEmailProvider(${provider.id})" ${campaignActive ? 'disabled' : ''} style="${campaignActive ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
+                <button class="delete-btn" id="delete-provider-${provider.id}" onclick="deleteEmailProvider(${provider.id})" ${campaignActive ? 'disabled' : ''} style="${campaignActive ? 'opacity: 0.5; cursor: not-allowed;' : ''}">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
@@ -2206,18 +3116,137 @@ function loadEmailProviders() {
     }
 }
 
-function deleteEmailProvider(providerId) {
-    if (confirm('Are you sure you want to delete this email provider?')) {
+/**
+ * Show delete confirmation modal for email provider
+ */
+function showDeleteConfirmationModal(providerId, providerName) {
+    const overlay = document.getElementById('deleteModalOverlay');
+    const modal = document.getElementById('deleteConfirmationModal');
+    const titleEl = document.getElementById('deleteModalTitle');
+    const messageEl = document.getElementById('deleteModalMessage');
+    const confirmBtn = document.getElementById('deleteModalConfirmBtn');
+    const cancelBtn = document.getElementById('deleteModalCancelBtn');
+    
+    // Update modal content
+    titleEl.textContent = 'Delete Email Provider';
+    messageEl.textContent = `Are you sure you want to delete "${providerName}"? This action cannot be undone.`;
+    
+    // Show modal
+    overlay.classList.add('active');
+    modal.classList.add('active');
+    
+    // Remove previous event listeners by cloning
+    confirmBtn.replaceWith(confirmBtn.cloneNode(true));
+    const newConfirmBtn = document.getElementById('deleteModalConfirmBtn');
+    
+    // Add new event listeners
+    newConfirmBtn.addEventListener('click', () => performDeleteEmailProvider(providerId));
+    cancelBtn.addEventListener('click', closeDeleteConfirmationModal);
+    overlay.addEventListener('click', closeDeleteConfirmationModal);
+}
+
+/**
+ * Close delete confirmation modal
+ */
+function closeDeleteConfirmationModal() {
+    const overlay = document.getElementById('deleteModalOverlay');
+    const modal = document.getElementById('deleteConfirmationModal');
+    
+    overlay.classList.remove('active');
+    modal.classList.remove('active');
+}
+
+/**
+ * Perform the actual deletion of email provider
+ */
+async function performDeleteEmailProvider(providerId) {
+    try {
+        // Close modal first
+        closeDeleteConfirmationModal();
+        
+        // Get the delete button and set loading state
+        const deleteBtn = document.getElementById(`delete-provider-${providerId}`);
+        if (!deleteBtn) {
+            throw new Error('Delete button not found');
+        }
+        
+        const originalIcon = deleteBtn.innerHTML;
+        deleteBtn.disabled = true;
+        deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        deleteBtn.style.pointerEvents = 'none';
+        deleteBtn.style.opacity = '0.7';
+        
+        // Call backend API to delete provider
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('Not logged in. Please login first.', 'error');
+            deleteBtn.disabled = false;
+            deleteBtn.innerHTML = originalIcon;
+            deleteBtn.style.pointerEvents = 'auto';
+            deleteBtn.style.opacity = '1';
+            return;
+        }
+        
+        const response = await fetch(`${API_BASE_URL}/email-providers/${providerId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Failed to delete provider (${response.status})`);
+        }
+        
+        // Success - update local cache
         let providers = JSON.parse(localStorage.getItem('emailProviders') || '[]');
+        const providerToDelete = providers.find(p => p.id === providerId);
         providers = providers.filter(p => p.id !== providerId);
         localStorage.setItem('emailProviders', JSON.stringify(providers));
         
-        showNotification('Email provider deleted', 'success');
+        // If deleted provider was selected default, clear the selection
+        const selectedProviderId = localStorage.getItem('selectedEmailProvider');
+        if (String(selectedProviderId) === String(providerId)) {
+            localStorage.removeItem('selectedEmailProvider');
+        }
+        
+        showNotification('✅ Email provider deleted successfully', 'success');
+        console.log('[EMAIL PROVIDER] Deleted provider:', providerToDelete?.name);
+        
+        // Reload the provider list
         loadEmailProviders();
         
         // Update dashboard stat in real-time
         updateMailProviderStat();
+        
+    } catch (error) {
+        console.error('[ERROR] Failed to delete email provider:', error);
+        showNotification('❌ ' + error.message, 'error');
+        
+        // Restore button state
+        const deleteBtn = document.getElementById(`delete-provider-${providerId}`);
+        if (deleteBtn) {
+            deleteBtn.disabled = false;
+            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+            deleteBtn.style.pointerEvents = 'auto';
+            deleteBtn.style.opacity = '1';
+        }
     }
+}
+
+/**
+ * Delete email provider - shows confirmation modal
+ */
+function deleteEmailProvider(providerId) {
+    // Get provider name from the list
+    const providers = JSON.parse(localStorage.getItem('emailProviders') || '[]');
+    const provider = providers.find(p => p.id === providerId);
+    const providerName = provider?.name || 'this email provider';
+    
+    // Show confirmation modal
+    showDeleteConfirmationModal(providerId, providerName);
 }
 
 function setDefaultProvider(e) {
@@ -2281,12 +3310,19 @@ function setupEmailSelectionPreference() {
     });
 }
 
-function handlePasswordUpdate(e) {
+async function handlePasswordUpdate(e) {
     e.preventDefault();
     
     const currentPassword = document.getElementById('currentPassword').value;
     const newPassword = document.getElementById('newPassword').value;
     const repeatPassword = document.getElementById('repeatPassword').value;
+    const errorDisplay = document.getElementById('currentPasswordError');
+    
+    // Clear previous error
+    if (errorDisplay) {
+        errorDisplay.style.display = 'none';
+        errorDisplay.textContent = '';
+    }
     
     if (!currentPassword || !newPassword || !repeatPassword) {
         showNotification('Please fill in all password fields', 'error');
@@ -2303,19 +3339,58 @@ function handlePasswordUpdate(e) {
         return;
     }
     
-    // Verify current password
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    if (user.password !== currentPassword) {
-        showNotification('Current password is incorrect', 'error');
+    if (currentPassword === newPassword) {
+        showNotification('New password must be different from current password', 'error');
         return;
     }
     
-    // Update password
-    user.password = newPassword;
-    localStorage.setItem('user', JSON.stringify(user));
+    // Prepare password update
+    const updateData = {
+        currentPassword: currentPassword,
+        newPassword: newPassword
+    };
     
-    showNotification('Password updated successfully', 'success');
-    document.getElementById('passwordForm').reset();
+    // Show loading state
+    const passwordForm = document.getElementById('passwordForm');
+    const submitBtn = passwordForm.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Updating...';
+    
+    // Send to backend
+    try {
+        const token = localStorage.getItem('jwt_token');
+        const response = await apiCall(`${API_BASE_URL}/users/change-password`, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + token,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updateData)
+        });
+        
+        // Success
+        showNotification('Password updated successfully', 'success');
+        passwordForm.reset();
+    } catch (error) {
+        // Error
+        const errorMsg = error.message || error;
+        if (errorMsg.includes('Current password') || errorMsg.includes('incorrect') || errorMsg.includes('does not match')) {
+            // Display error message next to password field
+            if (errorDisplay) {
+                errorDisplay.textContent = 'Current password does not match';
+                errorDisplay.style.display = 'block';
+            }
+            showNotification('Current password does not match', 'error');
+        } else if (errorMsg.includes('Password')) {
+            showNotification(errorMsg, 'error');
+        } else {
+            showNotification('Failed to update password. Please try again.', 'error');
+        }
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+    }
 }
 
 function setupDeleteAccount() {
@@ -2325,25 +3400,85 @@ function setupDeleteAccount() {
     }
 }
 
-function handleDeleteAccountClick() {
-    const confirmed = confirm(
-        'Are you absolutely sure you want to delete your account? This cannot be undone.\n\n' +
-        'All your data, campaigns, and email providers will be permanently deleted.'
-    );
+async function handleDeleteAccountClick() {
+    // Show deletion modal
+    const modal = document.getElementById('deleteAccountModal');
+    const overlay = document.getElementById('deleteAccountModalOverlay');
+    const confirmInput = document.getElementById('deleteConfirmationInput');
+    const confirmBtn = document.getElementById('confirmDeleteAccountBtn');
     
-    if (confirmed) {
-        const doubleConfirmed = confirm('Type "DELETE" in the next prompt to confirm account deletion.');
-        if (doubleConfirmed) {
-            // Clear all data
+    // Reset input and button state
+    confirmInput.value = '';
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = 'Delete Account';
+    
+    // Show modal
+    modal.style.display = 'block';
+    overlay.style.display = 'block';
+    
+    // Focus on input
+    confirmInput.focus();
+}
+
+function cancelDeleteAccount() {
+    const modal = document.getElementById('deleteAccountModal');
+    const overlay = document.getElementById('deleteAccountModalOverlay');
+    
+    // Hide modal
+    modal.style.display = 'none';
+    overlay.style.display = 'none';
+    
+    // Clear input
+    document.getElementById('deleteConfirmationInput').value = '';
+    showNotification('Account deletion cancelled', 'info');
+}
+
+async function confirmDeleteAccount() {
+    const confirmInput = document.getElementById('deleteConfirmationInput');
+    const confirmBtn = document.getElementById('confirmDeleteAccountBtn');
+    
+    // Check if user typed DELETE
+    if (confirmInput.value !== 'DELETE') {
+        showNotification('Please type DELETE to confirm', 'error');
+        return;
+    }
+    
+    // Show loading state
+    const originalText = confirmBtn.textContent;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Deleting...';
+    
+    // Send delete request to backend
+    try {
+        const token = localStorage.getItem('jwt_token');
+        const response = await apiCall(`${API_BASE_URL}/users/delete-account`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        });
+        
+        // Success
+        showNotification('Account deleted successfully', 'success');
+        
+        // Hide modal
+        const modal = document.getElementById('deleteAccountModal');
+        const overlay = document.getElementById('deleteAccountModalOverlay');
+        modal.style.display = 'none';
+        overlay.style.display = 'none';
+        
+        // Clear all data after a short delay
+        setTimeout(() => {
             localStorage.clear();
-            
-            showNotification('Account deleted successfully', 'success');
-            
-            // Redirect after a short delay
-            setTimeout(() => {
-                window.location.href = 'index.html';
-            }, 1000);
-        }
+            window.location.href = 'index.html';
+        }, 1500);
+    } catch (error) {
+        // Error
+        showNotification('Failed to delete account. Please try again.', 'error');
+        
+        // Reset button
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = originalText;
     }
 }
 

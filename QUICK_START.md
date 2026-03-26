@@ -126,15 +126,13 @@ java_mailer/
 │       └── util/       (Utilities)
 │
 ├── frontend/          ← Vanilla JS (port 3000)
-│   ├── index.html     (Dashboard)
-│   ├── upload.html    (CSV upload)
-│   ├── compose.html   (Email compose)
+│   ├── index.html     (Login/Auth)
+│   ├── app.html       (Main Dashboard with Compose & Upload)
+│   ├── auth.html      (Authentication)
 │   ├── css/styles.css
 │   └── js/
 │       ├── api-config.js
-│       ├── dashboard-handler.js
-│       ├── upload-handler.js
-│       └── compose-handler.js
+│       └── app.js
 │
 ├── README.md          (Full documentation)
 ├── SETUP_INSTRUCTIONS.md (Detailed setup)

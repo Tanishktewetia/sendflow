@@ -12,8 +12,8 @@
 | Endpoint Constant | URL | Method | File | Usage |
 |-------------------|-----|--------|------|-------|
 | EMAIL_HEALTH | `/api/emails/health` | GET | [api-config.js](frontend/js/api-config.js#L13) | Health check |
-| EMAIL_SEND | `/api/emails/send` | POST | [api-config.js](frontend/js/api-config.js#L12) | [compose-handler.js](frontend/js/compose-handler.js#L163) |
+| EMAIL_SEND | `/api/emails/send` | POST | [api-config.js](frontend/js/api-config.js#L12) | [app.js](frontend/js/app.js) - Compose section |
 | EMAIL_STATS | `/api/emails/stats` | GET | [api-config.js](frontend/js/api-config.js#L14) | Stats dashboard |
-| EMAIL_UPLOAD_CSV | `/api/emails/upload-csv` | POST | [api-config.js](frontend/js/api-config.js#L15) | [upload-handler.js](frontend/js/upload-handler.js#L203) |
+| EMAIL_UPLOAD_CSV | `/api/uploads/csv` | POST | [api-config.js](frontend/js/api-config.js#L55) | [app.js](frontend/js/app.js) - Upload & confirmUpload |
 
 **Base URL:** `http://localhost:8080/api`

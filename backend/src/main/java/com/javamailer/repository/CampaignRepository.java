@@ -54,4 +54,9 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
      * Count campaigns by status for a user
      */
     long countByUserIdAndStatus(Long userId, String status);
+    
+    /**
+     * Find all active campaigns using a specific email provider
+     */
+    List<Campaign> findByEmailProviderIdAndStatus(Long emailProviderId, String status);
 }

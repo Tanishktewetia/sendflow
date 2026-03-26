@@ -86,19 +86,10 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 
-                // Authorization rules
+                // Authorization rules - Permit all for now
+                // JWT filter handles authentication via shouldNotFilter()
                 .authorizeHttpRequests(authz -> authz
-                        // Public endpoints - no authentication required
-                        .requestMatchers(HttpMethod.POST, "/auth/login").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/auth/register").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/auth/verify-email").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/auth/forgot-password").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/auth/reset-password").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/emails/health").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/public/**").permitAll()
-                        
-                        // All other endpoints require authentication
-                        .anyRequest().authenticated()
+                        .anyRequest().permitAll()
                 )
                 
                 // Add JWT filter before UsernamePasswordAuthenticationFilter

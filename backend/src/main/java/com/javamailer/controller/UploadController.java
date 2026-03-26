@@ -4,6 +4,7 @@ import com.javamailer.security.JwtUserDetails;
 import com.javamailer.entity.CsvUpload;
 import com.javamailer.service.CsvService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -17,9 +18,18 @@ import java.util.Map;
 /**
  * CSV Upload Controller
  * Handles CSV file uploads and validation for campaign recipients
+ * 
+ * CSV REQUIREMENTS:
+ * - Max file size: 10MB
+ * - Max files per user: 5
+ * - Bucket: csv_uploads
+ * - Database table: csv_uploads
+ * - Deletion only on explicit user request
  */
+@Slf4j
 @RestController
-@RequestMapping("/api/uploads")
+@RequestMapping("/uploads")
+@CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"}, allowCredentials = "true")
 @RequiredArgsConstructor
 public class UploadController {
     
@@ -28,12 +38,53 @@ public class UploadController {
     /**
      * Upload CSV file
      * POST /api/uploads/csv
+     * Limits: 10MB max per file, 5 files max per user
      */
     @PostMapping("/csv")
     public ResponseEntity<?> uploadCsv(@RequestParam("file") MultipartFile file, Authentication authentication) {
         try {
             JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
             Long userId = userDetails.getUserId();
+            
+            // VALIDATION 1: Check file size (max 10MB)
+            final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+            if (file.getSize() > MAX_FILE_SIZE) {
+                long fileSizeMb = file.getSize() / 1024 / 1024;
+                log.warn("CSV upload rejected - File exceeds 10MB limit. User: {}, File: {}, Size: {}MB", 
+                    userId, file.getOriginalFilename(), fileSizeMb);
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "File size exceeds 10MB limit. Current size: " + fileSizeMb + "MB"));
+            }
+            
+            // VALIDATION 2: Check file is not empty
+            if (file.isEmpty()) {
+                log.warn("CSV upload rejected - Empty file. User: {}", userId);
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "File is empty"));
+            }
+            
+            // VALIDATION 3: Check file extension is .csv
+            String originalFilename = file.getOriginalFilename();
+            if (originalFilename == null || !originalFilename.endsWith(".csv")) {
+                log.warn("CSV upload rejected - Invalid file type. User: {}, File: {}", userId, originalFilename);
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "File must be a CSV file (ends with .csv)"));
+            }
+            
+            // VALIDATION 4: Check max uploads (5 max per user)
+            List<CsvUpload> userUploads = csvService.getUserCsvUploads(userId);
+            final int MAX_UPLOADS_PER_USER = 5;
+            if (userUploads.size() >= MAX_UPLOADS_PER_USER) {
+                log.warn("CSV upload rejected - Max 5 files limit reached. User: {}, Current files: {}", 
+                    userId, userUploads.size());
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Maximum 5 CSV files allowed per user. Please delete some files first.",
+                                   "currentFiles", userUploads.size(),
+                                   "maxFiles", MAX_UPLOADS_PER_USER));
+            }
+            
+            log.info("CSV upload started - User: {}, File: {}, Size: {} KB", 
+                userId, originalFilename, file.getSize() / 1024);
             
             // Upload file and get metadata
             CsvUpload csvUpload = csvService.uploadCsvFile(userId, file);
@@ -62,11 +113,15 @@ public class UploadController {
             response.put("duplicateRows", validationResult.get("duplicateRows"));
             response.put("successRate", csvUpload.getTotalRows() > 0 ? 
                     (100.0 * csvUpload.getValidRows() / csvUpload.getTotalRows()) : 0);
+            response.put("remainingUploads", MAX_UPLOADS_PER_USER - userUploads.size() - 1);
             
             // Include invalid records for user feedback
             if (validationResult.containsKey("invalidRecords")) {
                 response.put("invalidRecords", validationResult.get("invalidRecords"));
             }
+            
+            log.info("CSV upload successful - User: {}, Upload ID: {}, File: {}, Valid rows: {}/{}", 
+                userId, csvUpload.getId(), csvUpload.getFileName(), csvUpload.getValidRows(), csvUpload.getTotalRows());
             
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
             
@@ -171,6 +226,9 @@ public class UploadController {
     /**
      * Delete CSV upload
      * DELETE /api/uploads/{uploadId}
+     * 
+     * ⚠️ IMPORTANT: This endpoint deletes BOTH from database AND Supabase storage
+     * Only call this when user explicitly clicks delete button
      */
     @DeleteMapping("/{uploadId}")
     public ResponseEntity<?> deleteCsvUpload(@PathVariable Long uploadId, Authentication authentication) {
@@ -178,11 +236,14 @@ public class UploadController {
             JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
             Long userId = userDetails.getUserId();
             
+            log.info("CSV deletion requested - User: {}, Upload ID: {}", userId, uploadId);
             csvService.deleteCsvUpload(uploadId, userId);
             
+            log.info("CSV deleted successfully - User: {}, Upload ID: {}", userId, uploadId);
             return ResponseEntity.ok(Map.of("message", "Upload deleted successfully"));
             
         } catch (RuntimeException e) {
+            log.error("CSV deletion failed - Upload ID: {}, Error: {}", uploadId, e.getMessage());
             return ResponseEntity.badRequest()
                     .body(Map.of("error", e.getMessage()));
         }

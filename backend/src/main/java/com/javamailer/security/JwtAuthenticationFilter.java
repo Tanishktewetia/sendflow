@@ -82,14 +82,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
         String path = request.getRequestURI();
+        String contextPath = request.getContextPath();
         
-        // Skip authentication for public endpoints
-        return path.startsWith("/auth/login") ||
+        // Remove context path (/api) if present to get the actual endpoint path
+        if (!contextPath.isEmpty() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        
+        boolean shouldSkip = path.startsWith("/auth/login") ||
                path.startsWith("/auth/register") ||
                path.startsWith("/auth/verify-email") ||
+               path.startsWith("/auth/verify-otp") ||
                path.startsWith("/auth/forgot-password") ||
+               path.startsWith("/auth/resend-otp") ||
                path.startsWith("/auth/reset-password") ||
                path.startsWith("/emails/health") ||
                path.startsWith("/public");
+        
+        // Debug logging
+        log.debug("JWT Filter shouldNotFilter - URI: {}, ContextPath: {}, CleanPath: {}, Skip: {}", 
+                  request.getRequestURI(), contextPath, path, shouldSkip);
+        
+        return shouldSkip;
     }
 }

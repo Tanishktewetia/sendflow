@@ -57,6 +57,29 @@ public class CampaignService {
     }
     
     /**
+     * Create draft campaign (without email provider - optional until sending)
+     */
+    public Campaign createDraft(Long userId, String campaignName, String subject, String emailBody) {
+        Campaign campaign = Campaign.builder()
+                .userId(userId)
+                .emailProviderId(null)  // optional for drafts
+                .campaignName(campaignName)
+                .subject(subject)
+                .emailBody(emailBody)
+                .status("DRAFT")
+                .recipientCount(0)
+                .totalSent(0)
+                .totalFailed(0)
+                .totalPending(0)
+                .successRate(0.0)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        
+        return campaignRepository.save(campaign);
+    }
+    
+    /**
      * Get campaign by ID (security: verify ownership)
      */
     public Optional<Campaign> getCampaignByIdAndUserId(Long campaignId, Long userId) {

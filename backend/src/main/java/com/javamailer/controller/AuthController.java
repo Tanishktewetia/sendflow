@@ -20,7 +20,8 @@ import java.util.Map;
  * Handles user registration, login, email verification, and password reset
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/auth")
+@CrossOrigin(origins = {"http://localhost:3000", "http://127.0.0.1:3000"}, allowCredentials = "true")
 @RequiredArgsConstructor
 public class AuthController {
     
@@ -30,8 +31,13 @@ public class AuthController {
     private final SystemEmailService systemEmailService;
     
     /**
-     * Register new user
+     * Register new user - Step 1
      * POST /api/auth/register
+     * 
+     * Request: { "email": "user@example.com", "password": "Pass123", "fullName": "John Doe" }
+     * Response: OTP sent to email, user stored in memory only (NOT database yet)
+     * 
+     * Takes user through validation and sends OTP to email
      */
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody Map<String, String> request) {
@@ -40,31 +46,26 @@ public class AuthController {
             String password = request.get("password");
             String fullName = request.get("fullName");
             
+            // Normalize email
+            if (email != null) {
+                email = email.toLowerCase().trim();
+            }
+            if (fullName != null) {
+                fullName = fullName.trim();
+            }
+            
             // Validate input
             if (email == null || password == null || fullName == null) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Missing required fields: email, password, fullName"));
             }
             
-            // Register user
-            User user = authService.registerUser(email, password, fullName);
-            
-            // Generate email verification token
-            EmailVerificationToken verificationToken = authService.generateEmailVerificationToken(user);
-            
-            // Send verification email
-            try {
-                systemEmailService.sendVerificationEmail(user.getEmail(), verificationToken.getToken());
-            } catch (Exception e) {
-                System.err.println("Failed to send verification email: " + e.getMessage());
-                // Don't fail registration if email send fails
-            }
+            // Register user: validate + send OTP (stored in memory only)
+            Map<String, String> regData = authService.registerUser(email, password, fullName);
             
             Map<String, Object> response = new HashMap<>();
-            response.put("message", "Registration successful. Please verify your email to login.");
-            response.put("userId", user.getId());
-            response.put("email", user.getEmail());
-            response.put("verificationTokenSent", true);
+            response.put("message", regData.get("message"));
+            response.put("email", email);
             
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
             
@@ -75,8 +76,75 @@ public class AuthController {
     }
     
     /**
-     * Verify email with token
-     * POST /api/auth/verify-email
+     * Verify OTP and Create User - Step 2
+     * POST /api/auth/verify-otp
+     * 
+     * Request: { "email": "user@example.com", "otp": "123456" }
+     * Response: User created in database, ready to login
+     * 
+     * Verifies OTP matches and creates user in users table
+     */
+    @PostMapping("/verify-otp")
+    public ResponseEntity<?> verifyOtp(@RequestBody Map<String, String> request) {
+        try {
+            String email = request.get("email");
+            String otp = request.get("otp");
+            
+            if (email == null || otp == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Missing email or OTP"));
+            }
+            
+            email = email.toLowerCase().trim();
+            
+            // Verify OTP and create user in database
+            Map<String, String> result = authService.verifyOtpAndCreateUser(email, otp);
+            
+            return ResponseEntity.ok(Map.of(
+                "message", result.get("message"),
+                "email", result.get("email")
+            ));
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Resend OTP with 60-second throttle
+     * POST /api/auth/resend-otp
+     * Request body: { "email": "user@example.com" }
+     * 
+     * Generates new OTP and resends to email
+     * Only allows resend after 60 seconds since last resend
+     */
+    @PostMapping("/resend-otp")
+    public ResponseEntity<?> resendOtp(@RequestBody Map<String, String> request) {
+        try {
+            String email = request.get("email");
+            
+            if (email == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Missing email"));
+            }
+            
+            email = email.toLowerCase().trim();
+            
+            // Resend OTP with throttle check
+            Map<String, String> result = authService.resendOtp(email);
+            
+            return ResponseEntity.ok(Map.of("message", result.get("message")));
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Legacy endpoint - kept for backward compatibility
+     * @deprecated Use /register and /verify-otp instead
      */
     @PostMapping("/verify-email")
     public ResponseEntity<?> verifyEmail(@RequestBody Map<String, String> request) {
@@ -112,6 +180,11 @@ public class AuthController {
         try {
             String email = request.get("email");
             String password = request.get("password");
+            
+            // Normalize email
+            if (email != null) {
+                email = email.toLowerCase().trim();
+            }
             
             if (email == null || password == null) {
                 return ResponseEntity.badRequest()
@@ -150,6 +223,11 @@ public class AuthController {
         try {
             String email = request.get("email");
             
+            // Normalize email
+            if (email != null) {
+                email = email.toLowerCase().trim();
+            }
+            
             if (email == null) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Missing email"));
@@ -171,10 +249,10 @@ public class AuthController {
     
     /**
      * Verify OTP for password reset
-     * POST /api/auth/verify-otp
+     * POST /api/auth/verify-password-reset-otp
      */
-    @PostMapping("/verify-otp")
-    public ResponseEntity<?> verifyOtp(@RequestBody Map<String, String> request) {
+    @PostMapping("/verify-password-reset-otp")
+    public ResponseEntity<?> verifyPasswordResetOtp(@RequestBody Map<String, String> request) {
         try {
             String token = request.get("resetToken");
             String otp = request.get("otp");
@@ -223,6 +301,41 @@ public class AuthController {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Password reset failed"));
             }
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    /**
+     * Resend OTP for password reset (with 1-minute throttling)
+     * POST /api/auth/resend-password-reset-otp
+     */
+    @PostMapping("/resend-password-reset-otp")
+    public ResponseEntity<?> resendPasswordResetOtp(@RequestBody Map<String, String> request) {
+        try {
+            String email = request.get("email");
+            
+            // Normalize email
+            if (email != null) {
+                email = email.toLowerCase().trim();
+            }
+            
+            if (email == null) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Missing email"));
+            }
+            
+            String resetToken = authService.resendPasswordResetOtp(email);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "OTP resent successfully. Check your email.");
+            response.put("resetToken", resetToken);
+            response.put("throttleSeconds", 60);
+            response.put("expiryMinutes", 5);
+            
+            return ResponseEntity.ok(response);
             
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest()

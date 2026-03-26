@@ -6,6 +6,9 @@
 // Backend API Base URL
 const API_BASE_URL = 'http://localhost:8080/api';
 
+// Supabase Storage URL
+const SUPABASE_URL = 'https://gksgsxkusmorkbtkjemh.supabase.co';
+
 // JWT Token Storage Keys
 const JWT_TOKEN_KEY = 'jwt_token';
 const JWT_REFRESH_TOKEN_KEY = 'jwt_refresh_token';
@@ -17,8 +20,9 @@ const API_ENDPOINTS = {
     AUTH_REGISTER: `${API_BASE_URL}/auth/register`,
     AUTH_LOGIN: `${API_BASE_URL}/auth/login`,
     AUTH_VERIFY_EMAIL: `${API_BASE_URL}/auth/verify-email`,
-    AUTH_FORGOT_PASSWORD: `${API_BASE_URL}/auth/forgot-password`,
     AUTH_VERIFY_OTP: `${API_BASE_URL}/auth/verify-otp`,
+    AUTH_RESEND_OTP: `${API_BASE_URL}/auth/resend-otp`,
+    AUTH_FORGOT_PASSWORD: `${API_BASE_URL}/auth/forgot-password`,
     AUTH_RESET_PASSWORD: `${API_BASE_URL}/auth/reset-password`,
     AUTH_LOGOUT: `${API_BASE_URL}/auth/logout`,
     AUTH_REFRESH: `${API_BASE_URL}/auth/refresh-token`,
@@ -48,11 +52,13 @@ const API_ENDPOINTS = {
     EMAIL_PROVIDER_DELETE: (id) => `${API_BASE_URL}/email-providers/${id}`,
     EMAIL_PROVIDER_VERIFY: (id) => `${API_BASE_URL}/email-providers/${id}/verify`,
     
-    // CSV upload endpoints
-    CSV_UPLOAD: `${API_BASE_URL}/csv/upload`,
-    CSV_LIST: `${API_BASE_URL}/csv/uploads`,
-    CSV_GET: (id) => `${API_BASE_URL}/csv/uploads/${id}`,
-    CSV_PREVIEW: (id) => `${API_BASE_URL}/csv/uploads/${id}/preview`,
+    // CSV upload endpoints (Backend: /api/uploads)
+    EMAIL_UPLOAD_CSV: `${API_BASE_URL}/uploads/csv`,
+    CSV_UPLOAD: `${API_BASE_URL}/uploads/csv`,
+    CSV_LIST: `${API_BASE_URL}/uploads`,
+    CSV_GET: (id) => `${API_BASE_URL}/uploads/${id}`,
+    CSV_DELETE: (id) => `${API_BASE_URL}/uploads/${id}`,
+    CSV_PREVIEW: (id) => `${API_BASE_URL}/uploads/${id}/preview`,
 };
 
 /**

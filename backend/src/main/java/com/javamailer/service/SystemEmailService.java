@@ -2,17 +2,16 @@ package com.javamailer.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import com.javamailer.util.EmailProviderFactory;
 
 /**
  * System Email Service
  * Handles sending system emails (OTP, verification, notifications)
  * Always uses Resend provider for SendFlow system emails
+ * NOTE: NOT @Transactional because email failures should not rollback database operations
  */
 @Service
 @RequiredArgsConstructor
-@Transactional
 public class SystemEmailService {
     
     private final EmailProviderFactory emailProviderFactory;
@@ -92,6 +91,53 @@ public class SystemEmailService {
             "<div class='otp-box'><div class='otp-code'>" + otp + "</div></div>" +
             "<p><strong>OTP Valid For:</strong> 15 minutes</p>" +
             "<p class='warning'>⚠️ If you didn't request this, please ignore this email. Your account is safe.</p>" +
+            "<p>Best regards,<br><strong>SendFlow Team</strong></p></div>" +
+            "<div class='footer'><p>&copy; 2026 SendFlow. All rights reserved.</p>" +
+            "<p><a href='https://sendflow.com'>SendFlow.com</a></p></div></div>" +
+            "</body></html>";
+    }
+    
+    /**
+     * Send verification email to new user with 6-digit OTP
+     * @param userEmail recipient email address
+     * @param verificationToken email verification token (for server-side verification)
+     * @param otp 6-digit one-time password
+     * @return true if send successful
+     */
+    public boolean sendVerificationEmailWithOtp(String userEmail, String verificationToken, String otp) {
+        try {
+            String subject = "SendFlow - Verify Your Email (OTP: " + otp + ")";
+            String body = buildVerificationEmailBodyWithOtp(otp);
+            
+            return emailProviderFactory.sendEmailVia("RESEND", userEmail, subject, body);
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to send verification email: " + e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Build email verification HTML body with 6-digit OTP
+     */
+    private String buildVerificationEmailBodyWithOtp(String otp) {
+        return "<!DOCTYPE html><html><head><style>" +
+            "body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }" +
+            ".container { max-width: 600px; margin: 0 auto; padding: 20px; }" +
+            ".header { background-color: #28a745; color: white; padding: 20px; text-align: center; border-radius: 5px; }" +
+            ".content { padding: 20px; background-color: #f9f9f9; border-radius: 5px; margin-top: 20px; }" +
+            ".otp-box { background-color: #fff; padding: 20px; text-align: center; border-radius: 5px; margin: 20px 0; border: 2px solid #28a745; }" +
+            ".otp-code { font-size: 36px; font-weight: bold; color: #28a745; letter-spacing: 5px; }" +
+            ".footer { text-align: center; margin-top: 20px; font-size: 12px; color: #666; }" +
+            ".warning { color: #dc3545; font-size: 14px; margin-top: 20px; }" +
+            "</style></head><body>" +
+            "<div class='container'>" +
+            "<div class='header'><h2>Verify Your Email - SendFlow</h2></div>" +
+            "<div class='content'><p>Hello,</p>" +
+            "<p>Thank you for signing up for SendFlow! Please use the verification code below to activate your account:</p>" +
+            "<div class='otp-box'><div class='otp-code'>" + otp + "</div></div>" +
+            "<p><strong>⏱️ Code Valid For:</strong> 5 minutes only</p>" +
+            "<p><strong>Enter this code in the SendFlow app to verify your email.</strong></p>" +
+            "<p class='warning'>⚠️ Act quickly - this code expires in 5 minutes. If you didn't sign up for SendFlow, please ignore this email.</p>" +
             "<p>Best regards,<br><strong>SendFlow Team</strong></p></div>" +
             "<div class='footer'><p>&copy; 2026 SendFlow. All rights reserved.</p>" +
             "<p><a href='https://sendflow.com'>SendFlow.com</a></p></div></div>" +

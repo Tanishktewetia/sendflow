@@ -28,6 +28,15 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
+    <!-- Repositories -->
+    <repositories>
+        <!-- JitPack repository for Supabase storage-java -->
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
     <!-- Dependencies -->
     <dependencies>
         <!-- Spring Web - REST API support -->
@@ -84,6 +93,12 @@
             <version>42.7.1</version>
         </dependency>
 
+        <!-- Flyway - Database migration tool -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+
         <!-- Spring Security - Authentication & Authorization -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -129,6 +144,33 @@
             <artifactId>smtp</artifactId>
             <version>2.0.1</version>
         </dependency>
+
+        <!-- AWS SDK v2 for S3 (for Supabase Storage - S3 compatible) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.25.0</version>
+        </dependency>
+
+        <!-- Spring Cloud AWS for integration -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-aws</artifactId>
+            <version>2.2.6.RELEASE</version>
+        </dependency>
+
+        <!-- Jackson for JSON processing -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- OkHttp for REST API calls to Resend/Supabase -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.11.0</version>
+        </dependency>
     </dependencies>
 
     <!-- Build Configuration -->
@@ -139,12 +181,23 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <skip>false</skip>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+            
+            <!-- Exec Maven Plugin for direct Java execution -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <mainClass>com.javamailer.JavaMailerApplication</mainClass>
                 </configuration>
             </plugin>
 
@@ -157,13 +210,6 @@
                     <source>17</source>
                     <target>17</target>
                 </configuration>
-            </plugin>
-
-            <!-- Exec Maven Plugin - For running Java main classes -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
             </plugin>
         </plugins>
     </build>

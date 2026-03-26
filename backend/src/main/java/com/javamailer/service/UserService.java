@@ -169,11 +169,46 @@ public class UserService {
             userRepository.save(u);
         }
     }
+
+    /**
+     * Permanently delete user account and all related data
+     * Foreign key constraints with ON DELETE CASCADE will remove:
+     * - All campaigns
+     * - All email providers
+     * - All CSV uploads
+     * - All email verification tokens
+     * - All password reset tokens
+     * - Any other user-related data
+     */
+    public void deleteUser(Long userId) {
+        if (!userRepository.existsById(userId)) {
+            throw new RuntimeException("User not found: " + userId);
+        }
+        userRepository.deleteById(userId);
+    }
     
     /**
      * Verify password (for login)
      */
     public boolean verifyPassword(String rawPassword, String hashedPassword) {
         return passwordEncoder.matches(rawPassword, hashedPassword);
+    }
+
+    /**
+     * Clear user avatar metadata
+     */
+    public void clearUserAvatar(Long userId) {
+        Optional<User> user = userRepository.findById(userId);
+        if (user.isPresent()) {
+            User u = user.get();
+            u.setAvatarFileName(null);
+            u.setAvatarFileSize(null);
+            u.setAvatarMimeType(null);
+            u.setAvatarStoragePath(null);
+            u.setUpdatedAt(LocalDateTime.now());
+            userRepository.save(u);
+        } else {
+            throw new RuntimeException("User not found: " + userId);
+        }
     }
 }

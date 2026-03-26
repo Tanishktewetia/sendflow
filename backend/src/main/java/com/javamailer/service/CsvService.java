@@ -6,6 +6,7 @@ import com.javamailer.repository.CampaignRecipientRepository;
 import com.javamailer.repository.CsvUploadRepository;
 import com.javamailer.util.EmailValidator;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -21,7 +22,15 @@ import org.springframework.web.multipart.MultipartFile;
 /**
  * Service class for CSV upload and recipient management
  * Handles CSV parsing, validation, and recipient creation
+ * 
+ * CSV UPLOAD REQUIREMENTS:
+ * - Max file size: 10MB
+ * - Max files per user: 5
+ * - Files stored in Supabase bucket: csv_uploads
+ * - Metadata stored in database table: csv_uploads
+ * - Deletion only happens when user explicitly clicks delete button (not automatic)
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -29,29 +38,42 @@ public class CsvService {
     
     private final CsvUploadRepository csvUploadRepository;
     private final CampaignRecipientRepository campaignRecipientRepository;
+    private final SupabaseStorageService supabaseStorageService;
     
     private static final String[] CSV_HEADERS = {"name", "email", "company", "customField1", "customField2"};
     private static final int MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
     
     /**
      * Upload and parse CSV file
+     * Uploads file to Supabase Storage and stores path in database
+     * 
+     * Requirements:
+     * - Max 10MB file size
+     * - Max 5 files per user (validated in controller)
+     * - File stored with fixed naming to allow overwrites
      */
     public CsvUpload uploadCsvFile(Long userId, MultipartFile file) throws IOException {
         // Validate file
         if (file.isEmpty()) {
+            log.warn("CSV upload attempt with empty file by user {}", userId);
             throw new RuntimeException("CSV file is empty");
         }
         
         if (file.getSize() > MAX_FILE_SIZE) {
+            log.warn("CSV upload attempt exceeds 10MB limit by user {}: {} bytes", userId, file.getSize());
             throw new RuntimeException("File size exceeds 10MB limit");
         }
         
-        // Store file metadata
+        // Upload file to Supabase Storage (returns file path)
+        String storagePath = supabaseStorageService.uploadCsvFile(userId, file);
+        log.info("CSV file uploaded to Supabase by user {}: {} -> {}", userId, file.getOriginalFilename(), storagePath);
+        
+        // Store file metadata with Supabase path
         CsvUpload csvUpload = CsvUpload.builder()
                 .userId(userId)
                 .fileName(file.getOriginalFilename())
                 .fileSizeBytes(file.getSize())
-                .fileStoragePath("/uploads/csv/" + userId + "/" + System.currentTimeMillis() + "_" + file.getOriginalFilename())
+                .fileStoragePath(storagePath)  // ✅ Store Supabase path
                 .totalRows(0)
                 .validRows(0)
                 .invalidRows(0)
@@ -60,7 +82,9 @@ public class CsvService {
                 .uploadedAt(LocalDateTime.now())
                 .build();
         
-        return csvUploadRepository.save(csvUpload);
+        CsvUpload saved = csvUploadRepository.save(csvUpload);
+        log.info("CSV metadata saved to database - Upload ID: {}, User: {}, File: {}", saved.getId(), userId, file.getOriginalFilename());
+        return saved;
     }
     
     /**
@@ -202,15 +226,34 @@ public class CsvService {
     /**
      * Delete CSV upload and associated recipients
      */
+    /**
+     * Delete CSV upload - removes from both database and Supabase storage
+     * 
+     * ⚠️ CRITICAL: Only call this when user explicitly clicks delete button
+     * This ensures CSV files persist in storage until user action
+     */
     public void deleteCsvUpload(Long csvUploadId, Long userId) {
         Optional<CsvUpload> csvUpload = csvUploadRepository.findByIdAndUserId(csvUploadId, userId);
         if (csvUpload.isPresent()) {
             CsvUpload csv = csvUpload.get();
+            String storagePath = csv.getFileStoragePath();
             
-            // Delete all campaign recipients that used this CSV
-            // (This is application-level - database handles cascade)
+            // Delete from database first
             csvUploadRepository.delete(csv);
+            log.info("CSV record deleted from database - Upload ID: {}, User: {}, File: {}", csvUploadId, userId, csv.getFileName());
+            
+            // Delete from Supabase Storage if path exists
+            if (storagePath != null && !storagePath.isEmpty()) {
+                try {
+                    supabaseStorageService.deleteCsvFile(storagePath);
+                    log.info("CSV file deleted from Supabase - User: {}, File: {}, Path: {}", userId, csv.getFileName(), storagePath);
+                } catch (IOException e) {
+                    log.error("Failed to delete CSV from Supabase - User: {}, Path: {}, Error: {}", userId, storagePath, e.getMessage(), e);
+                    // Continue - database record is already deleted, just log the storage error
+                }
+            }
         } else {
+            log.warn("CSV upload not found for deletion - Upload ID: {}, User: {}", csvUploadId, userId);
             throw new RuntimeException("CSV upload not found: " + csvUploadId);
         }
     }

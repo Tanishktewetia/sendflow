@@ -166,6 +166,16 @@
             <p>&copy; 2026 SendFlow. All rights reserved.</p>
         </div>
     </footer>
+    
+    <!-- Authentication Check -->
+    <script src="js/api-config.js"></script>
+    <script>
+        // If user is already authenticated, redirect to app
+        if (typeof isAuthenticated === 'function' && isAuthenticated()) {
+            window.location.href = 'app.html';
+        }
+    </script>
+    
     <script src="js/index.js"></script>
 </body>
 </html>
