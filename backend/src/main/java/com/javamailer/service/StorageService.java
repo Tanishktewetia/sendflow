@@ -178,4 +178,47 @@ public class StorageService {
                 )
                 .build();
     }
+    
+    /**
+     * Generic upload file method for flexible usage
+     * Path should be format: "csv/subdir/file.csv"
+     */
+    public void uploadFile(byte[] data, String filePath, String contentType) throws IOException {
+        S3Client s3Client = buildS3Client();
+        try {
+            // Determine bucket from path prefix
+            String bucket = csvBucket; // Default to CSV bucket
+            
+            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(filePath)
+                    .contentType(contentType != null ? contentType : "application/octet-stream")
+                    .acl(ObjectCannedACL.PUBLIC_READ)
+                    .build();
+            
+            s3Client.putObject(putObjectRequest, RequestBody.fromBytes(data));
+        } finally {
+            s3Client.close();
+        }
+    }
+    
+    /**
+     * Generic download file method for flexible usage
+     * Path should be format: "csv/subdir/file.csv"
+     */
+    public byte[] downloadFile(String filePath) throws IOException {
+        S3Client s3Client = buildS3Client();
+        try {
+            String bucket = csvBucket; // Default to CSV bucket
+            
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(filePath)
+                    .build();
+            
+            return s3Client.getObject(getObjectRequest).readAllBytes();
+        } finally {
+            s3Client.close();
+        }
+    }
 }

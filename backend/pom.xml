@@ -171,6 +171,13 @@
             <artifactId>okhttp</artifactId>
             <version>4.11.0</version>
         </dependency>
+
+        <!-- Apache Commons Validator - Email validation -->
+        <dependency>
+            <groupId>commons-validator</groupId>
+            <artifactId>commons-validator</artifactId>
+            <version>1.8.0</version>
+        </dependency>
     </dependencies>
 
     <!-- Build Configuration -->
