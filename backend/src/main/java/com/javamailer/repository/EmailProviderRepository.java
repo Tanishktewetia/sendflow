@@ -42,6 +42,8 @@ public interface EmailProviderRepository extends JpaRepository<EmailProvider, Lo
      * Find unverified providers requiring attention
      */
     List<EmailProvider> findByUserIdAndIsVerifiedFalse(Long userId);
+
+    long deleteByUserId(Long userId);
     
     /**
      * Get default provider for user (most recently verified)

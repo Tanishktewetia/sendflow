@@ -4,6 +4,7 @@ import com.javamailer.security.JwtUserDetails;
 import com.javamailer.entity.User;
 import com.javamailer.service.UserService;
 import com.javamailer.service.SupabaseStorageService;
+import com.javamailer.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -28,6 +29,7 @@ public class UserController {
     
     private final UserService userService;
     private final SupabaseStorageService supabaseStorageService;
+    private final UserRepository userRepository;
     
     /**
      * Get user profile
@@ -154,8 +156,7 @@ public class UserController {
                         .body(Map.of("error", "Not authenticated"));
             }
             
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveAuthenticatedUserId(authentication);
             
             userService.deactivateUser(userId);
             
@@ -180,8 +181,7 @@ public class UserController {
                         .body(Map.of("error", "Not authenticated"));
             }
             
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveAuthenticatedUserId(authentication);
             
             userService.deleteUser(userId);
             
@@ -191,6 +191,35 @@ public class UserController {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", e.getMessage()));
         }
+    }
+
+    private Long resolveAuthenticatedUserId(Authentication authentication) {
+        Object details = authentication.getDetails();
+        if (details instanceof JwtUserDetails userDetails) {
+            return userDetails.getUserId();
+        }
+
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof JwtUserDetails userDetails) {
+            return userDetails.getUserId();
+        }
+
+        String emailCandidate = null;
+        if (principal instanceof String p && !p.isBlank() && !"anonymousUser".equalsIgnoreCase(p)) {
+            emailCandidate = p;
+        } else if (authentication.getName() != null
+                && !authentication.getName().isBlank()
+                && !"anonymousUser".equalsIgnoreCase(authentication.getName())) {
+            emailCandidate = authentication.getName();
+        }
+
+        if (emailCandidate != null) {
+            return userRepository.findByEmail(emailCandidate)
+                    .map(User::getId)
+                    .orElseThrow(() -> new RuntimeException("Unable to resolve authenticated user"));
+        }
+
+        throw new RuntimeException("Unable to resolve authenticated user");
     }
 
     /**
@@ -306,6 +335,74 @@ public class UserController {
         } catch (IOException e) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Delete failed: " + e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Error: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Set email selection preference
+     * POST /api/users/email-selection-preference
+     */
+    @PostMapping("/email-selection-preference")
+    public ResponseEntity<?> setEmailSelectionPreference(
+            @RequestBody Map<String, String> request,
+            Authentication authentication) {
+        try {
+            if (authentication == null || !authentication.isAuthenticated()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Not authenticated"));
+            }
+
+            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
+            Long userId = userDetails.getUserId();
+            String preference = request.get("preference");
+
+            if (preference == null || preference.trim().isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "preference is required"));
+            }
+
+            userService.setEmailSelectionPreference(userId, preference);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Email selection preference updated successfully");
+            response.put("preference", preference);
+
+            return ResponseEntity.ok(response);
+
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Error: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Get email selection preference
+     * GET /api/users/email-selection-preference
+     */
+    @GetMapping("/email-selection-preference")
+    public ResponseEntity<?> getEmailSelectionPreference(Authentication authentication) {
+        try {
+            if (authentication == null || !authentication.isAuthenticated()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("error", "Not authenticated"));
+            }
+
+            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
+            Long userId = userDetails.getUserId();
+
+            String preference = userService.getEmailSelectionPreference(userId);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("preference", preference);
+
+            return ResponseEntity.ok(response);
+
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest()
                     .body(Map.of("error", "Error: " + e.getMessage()));

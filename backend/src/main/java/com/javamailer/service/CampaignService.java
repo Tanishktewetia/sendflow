@@ -99,6 +99,20 @@ public class CampaignService {
     public List<Campaign> getCampaignsByStatus(Long userId, String status) {
         return campaignRepository.findByStatusAndUserId(status, userId);
     }
+
+    /**
+     * Get latest draft for a user
+     */
+    public Optional<Campaign> getLatestDraft(Long userId) {
+        return campaignRepository.findFirstByUserIdAndStatusOrderByCreatedAtDesc(userId, "DRAFT");
+    }
+
+    /**
+     * Clear all drafts for a user
+     */
+    public long clearDrafts(Long userId) {
+        return campaignRepository.deleteByUserIdAndStatus(userId, "DRAFT");
+    }
     
     /**
      * Update campaign (only if DRAFT or PAUSED)

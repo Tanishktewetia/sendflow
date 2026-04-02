@@ -103,7 +103,8 @@ public class EmailService {
             return true;
             
         } catch (Exception e) {
-            log.error("SMTP send error: {}", e.getMessage());
+            log.error("SMTP send error - host: {}, port: {}, user: {}, to: {}, ssl: {}, error: {}",
+                    host, port, username, toEmail, useSSL, e.getMessage(), e);
             return false;
         }
     }

@@ -96,6 +96,18 @@
     color: #707070;
 }
 
+.form-inline-error {
+    min-height: 1.1rem;
+    margin-top: 0.15rem;
+    color: #ff7b7b;
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.form-inline-error.hidden {
+    visibility: hidden;
+}
+
 .forgot-password-link {
     font-size: 0.8rem;
     color: #10a37f;
@@ -272,9 +284,10 @@
     font-family: 'Courier New', monospace;
 }
 
-.otp-footer {0.7rem;
+.otp-footer {
+    padding: 0.7rem;
     text-align: center;
-    font-size: 0.75nter;
+    font-size: 0.75rem;
     font-size: 0.8rem;
 }
 
@@ -296,6 +309,67 @@
 
 .link-btn:hover {
     color: #088d64;
+}
+
+/* Dashboard-matching notification theme */
+.notification {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: rgba(16, 163, 127, 0.2);
+    border: 1px solid #10a37f;
+    color: #10a37f;
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    visibility: hidden;
+    opacity: 0;
+    z-index: 9999;
+    animation: slideIn 0.3s ease;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    max-width: 420px;
+    word-break: break-word;
+}
+
+.notification.show {
+    visibility: visible;
+    opacity: 1;
+}
+
+.notification.type-success {
+    background: rgba(16, 163, 127, 0.2);
+    border: 1px solid #10a37f;
+    color: #10a37f;
+}
+
+.notification.type-error {
+    background: rgba(255, 68, 68, 0.2);
+    border: 1px solid #ff4444;
+    color: #ff4444;
+}
+
+.notification.type-warning {
+    background: rgba(255, 153, 0, 0.2);
+    border: 1px solid #ff9900;
+    color: #ff9900;
+}
+
+.notification.type-info {
+    background: rgba(100, 150, 200, 0.2);
+    border: 1px solid #6496c8;
+    color: #6496c8;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }
 
 /* Responsive Design */

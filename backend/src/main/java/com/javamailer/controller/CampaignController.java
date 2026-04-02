@@ -4,6 +4,8 @@ import com.javamailer.security.JwtUserDetails;
 import com.javamailer.entity.Campaign;
 import com.javamailer.entity.CampaignRecipient;
 import com.javamailer.entity.EmailLog;
+import com.javamailer.entity.User;
+import com.javamailer.repository.UserRepository;
 import com.javamailer.service.CampaignService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -27,6 +29,7 @@ import java.util.Map;
 public class CampaignController {
     
     private final CampaignService campaignService;
+    private final UserRepository userRepository;
     
     /**
      * Save draft campaign (without email provider or recipients)
@@ -35,8 +38,7 @@ public class CampaignController {
     @PostMapping("/draft/save")
     public ResponseEntity<?> saveDraft(@RequestBody Map<String, Object> request, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             String subject = (String) request.get("subject");
             String emailBody = (String) request.get("emailBody");
@@ -73,8 +75,7 @@ public class CampaignController {
     @GetMapping
     public ResponseEntity<?> getCampaigns(Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             Page<Campaign> campaigns = campaignService.getUserCampaigns(userId, PageRequest.of(0, 20));
             
@@ -91,6 +92,48 @@ public class CampaignController {
                     .body(Map.of("error", e.getMessage()));
         }
     }
+
+    /**
+     * Get latest draft campaign for user
+     * GET /api/campaigns/draft/latest
+     */
+    @GetMapping("/draft/latest")
+    public ResponseEntity<?> getLatestDraft(Authentication authentication) {
+        try {
+            Long userId = resolveUserId(authentication);
+            var draft = campaignService.getLatestDraft(userId);
+
+            if (draft.isEmpty()) {
+                return ResponseEntity.ok(Map.of("hasDraft", false));
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "hasDraft", true,
+                    "draft", draft.get()
+            ));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Clear all draft campaigns for user
+     * DELETE /api/campaigns/draft
+     */
+    @DeleteMapping("/draft")
+    public ResponseEntity<?> clearDrafts(Authentication authentication) {
+        try {
+            Long userId = resolveUserId(authentication);
+            long deleted = campaignService.clearDrafts(userId);
+
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "deleted", deleted
+            ));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
     
     /**
      * Get campaign by ID
@@ -99,8 +142,7 @@ public class CampaignController {
     @GetMapping("/{campaignId}")
     public ResponseEntity<?> getCampaign(@PathVariable Long campaignId, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             Campaign campaign = campaignService.getCampaignByIdAndUserId(campaignId, userId)
                     .orElseThrow(() -> new RuntimeException("Campaign not found"));
@@ -122,8 +164,7 @@ public class CampaignController {
                                            @RequestBody Map<String, String> request,
                                            Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             String campaignName = request.get("campaignName");
             String subject = request.get("subject");
@@ -146,8 +187,7 @@ public class CampaignController {
     @PostMapping("/{campaignId}/start")
     public ResponseEntity<?> startCampaign(@PathVariable Long campaignId, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             Campaign campaign = campaignService.startCampaign(campaignId, userId);
             
@@ -166,8 +206,7 @@ public class CampaignController {
     @PostMapping("/{campaignId}/pause")
     public ResponseEntity<?> pauseCampaign(@PathVariable Long campaignId, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             Campaign campaign = campaignService.pauseCampaign(campaignId, userId);
             
@@ -186,8 +225,7 @@ public class CampaignController {
     @PostMapping("/{campaignId}/complete")
     public ResponseEntity<?> completeCampaign(@PathVariable Long campaignId, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             Campaign campaign = campaignService.completeCampaign(campaignId, userId);
             
@@ -206,8 +244,7 @@ public class CampaignController {
     @GetMapping("/{campaignId}/stats")
     public ResponseEntity<?> getCampaignStats(@PathVariable Long campaignId, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             // Verify ownership and get stats
             Campaign campaign = campaignService.getCampaignStats(campaignId, userId);
@@ -237,8 +274,7 @@ public class CampaignController {
     @DeleteMapping("/{campaignId}")
     public ResponseEntity<?> deleteCampaign(@PathVariable Long campaignId, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             campaignService.deleteCampaign(campaignId, userId);
             
@@ -257,8 +293,7 @@ public class CampaignController {
     @PostMapping("/{campaignId}/execute")
     public ResponseEntity<?> executeCampaign(@PathVariable Long campaignId, Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             // Verify ownership
             Campaign campaign = campaignService.getCampaignByIdAndUserId(campaignId, userId)
@@ -297,8 +332,7 @@ public class CampaignController {
             @RequestParam(defaultValue = "20") int size,
             Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             // Verify ownership
             Campaign campaign = campaignService.getCampaignByIdAndUserId(campaignId, userId)
@@ -335,8 +369,7 @@ public class CampaignController {
             @RequestParam(defaultValue = "20") int size,
             Authentication authentication) {
         try {
-            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
-            Long userId = userDetails.getUserId();
+            Long userId = resolveUserId(authentication);
             
             // Verify ownership
             Campaign campaign = campaignService.getCampaignByIdAndUserId(campaignId, userId)
@@ -360,5 +393,38 @@ public class CampaignController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", e.getMessage()));
         }
+    }
+
+    private Long resolveUserId(Authentication authentication) {
+        if (authentication == null) {
+            throw new RuntimeException("User not authenticated");
+        }
+
+        Object details = authentication.getDetails();
+        if (details instanceof JwtUserDetails userDetails) {
+            return userDetails.getUserId();
+        }
+
+        Object principal = authentication.getPrincipal();
+        if (principal instanceof JwtUserDetails userDetails) {
+            return userDetails.getUserId();
+        }
+
+        String emailCandidate = null;
+        if (principal instanceof String p && !p.isBlank() && !"anonymousUser".equalsIgnoreCase(p)) {
+            emailCandidate = p;
+        } else if (authentication.getName() != null
+                && !authentication.getName().isBlank()
+                && !"anonymousUser".equalsIgnoreCase(authentication.getName())) {
+            emailCandidate = authentication.getName();
+        }
+
+        if (emailCandidate != null) {
+            return userRepository.findByEmail(emailCandidate)
+                    .map(User::getId)
+                    .orElseThrow(() -> new RuntimeException("Unable to resolve authenticated user from email principal"));
+        }
+
+        throw new RuntimeException("Unable to resolve authenticated user");
     }
 }

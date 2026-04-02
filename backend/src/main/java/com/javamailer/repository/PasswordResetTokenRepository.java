@@ -44,6 +44,8 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
      * Find token by OTP and validate it's unused and not expired
      */
     Optional<PasswordResetToken> findByOtpAndIsUsedFalseAndExpiresAtAfter(String otp, LocalDateTime now);
+
+    long deleteByUserId(Long userId);
     
     /**
      * Find expired tokens (for cleanup)

@@ -32,6 +32,8 @@ public interface EmailVerificationTokenRepository extends JpaRepository<EmailVer
      * Check if token exists and is valid
      */
     Optional<EmailVerificationToken> findByTokenAndIsUsedFalseAndExpiresAtAfter(String token, LocalDateTime now);
+
+    long deleteByUserId(Long userId);
     
     /**
      * Delete expired tokens

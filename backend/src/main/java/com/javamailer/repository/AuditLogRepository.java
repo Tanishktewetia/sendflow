@@ -44,4 +44,6 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
      * Find suspicious activity (multiple failed logins, etc.)
      */
     long countByUserIdAndActionAndCreatedAtAfter(Long userId, String action, LocalDateTime since);
+
+    long deleteByUserId(Long userId);
 }

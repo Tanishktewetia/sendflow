@@ -53,4 +53,6 @@ public interface ActivityLogRepository extends JpaRepository<ActivityLog, Long> 
      * Find failed activities for error tracking
      */
     Page<ActivityLog> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, String status, Pageable pageable);
+
+    long deleteByUserId(Long userId);
 }

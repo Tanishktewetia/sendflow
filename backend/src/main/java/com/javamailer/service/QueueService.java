@@ -32,6 +32,7 @@ public class QueueService {
     private final CampaignRepository campaignRepository;
     private final CsvUploadRepository csvUploadRepository;
     private final ActivityLogService activityLogService;
+    private final CampaignDashboardStatsService campaignDashboardStatsService;
     
     /**
      * Enqueue a campaign (add to queue)
@@ -71,6 +72,12 @@ public class QueueService {
                     .build();
             
             CampaignQueue saved = campaignQueueRepository.save(queueEntry);
+
+            csvUpload.setIsQueued(true);
+            csvUpload.setQueuePosition(nextPosition);
+            csvUpload.setQueuedAt(LocalDateTime.now());
+            csvUpload.setStatus("QUEUED");
+            csvUploadRepository.save(csvUpload);
             
             // Log activity
             activityLogService.logCampaignStart(campaign.getUserId(), campaignId, csvUploadId,
@@ -122,6 +129,12 @@ public class QueueService {
         queueEntry.setFailedRecipients(0);
         
         CampaignQueue updated = campaignQueueRepository.save(queueEntry);
+
+        csvUploadRepository.findById(queueEntry.getCsvUploadId()).ifPresent(csv -> {
+            csv.setStatus("PROCESSING");
+            csvUploadRepository.save(csv);
+        });
+
         log.info("Campaign processing started - QueueID: {}, CampaignID: {}", queueId, queueEntry.getCampaignId());
         
         return updated;
@@ -133,9 +146,14 @@ public class QueueService {
     public CampaignQueue pauseCampaign(Long queueId, String reason) {
         CampaignQueue queueEntry = campaignQueueRepository.findById(queueId)
                 .orElseThrow(() -> new IllegalArgumentException("Queue entry not found: " + queueId));
-        
-        if (!queueEntry.getStatus().equals("PROCESSING")) {
-            throw new IllegalStateException("Can only pause PROCESSING campaigns");
+
+        if ("PAUSED".equals(queueEntry.getStatus())) {
+            return queueEntry;
+        }
+
+        if (!"PROCESSING".equals(queueEntry.getStatus())) {
+            log.info("Ignoring pause request for queue {} in status {}", queueId, queueEntry.getStatus());
+            return queueEntry;
         }
         
         queueEntry.setStatus("PAUSED");
@@ -184,6 +202,21 @@ public class QueueService {
         queueEntry.setCompletedAt(LocalDateTime.now());
         
         CampaignQueue updated = campaignQueueRepository.save(queueEntry);
+
+        csvUploadRepository.findById(queueEntry.getCsvUploadId()).ifPresent(csv -> {
+            csv.setStatus("COMPLETED");
+            csv.setIsQueued(false);
+            csv.setQueuePosition(null);
+            csv.setQueuedAt(null);
+            csv.setProcessedAt(LocalDateTime.now());
+            csv.setErrorDetails(null);
+            csvUploadRepository.save(csv);
+        });
+
+        campaignRepository.findById(queueEntry.getCampaignId()).ifPresent(campaign -> {
+            campaign.setStatus("COMPLETED");
+            campaignRepository.save(campaign);
+        });
         
         // Calculate elapsed time
         Long elapsedMs = queueEntry.getStartedAt() != null ? 
@@ -192,6 +225,12 @@ public class QueueService {
         // Log activity
         activityLogService.logCampaignCompleted(queueEntry.getUserId(), queueEntry.getCampaignId(),
                 queueEntry.getSentRecipients(), queueEntry.getFailedRecipients(), elapsedMs);
+
+        try {
+            campaignDashboardStatsService.recordCampaignOutcome(updated);
+        } catch (Exception ex) {
+            log.error("Stats persistence failed on completion - QueueID: {}, error: {}", queueId, ex.getMessage(), ex);
+        }
         
         log.info("Campaign completed - QueueID: {}, Sent: {}, Failed: {}", 
                 queueId, queueEntry.getSentRecipients(), queueEntry.getFailedRecipients());
@@ -211,6 +250,27 @@ public class QueueService {
         queueEntry.setCompletedAt(LocalDateTime.now());
         
         CampaignQueue updated = campaignQueueRepository.save(queueEntry);
+
+        csvUploadRepository.findById(queueEntry.getCsvUploadId()).ifPresent(csv -> {
+            csv.setStatus("FAILED");
+            csv.setIsQueued(false);
+            csv.setQueuePosition(null);
+            csv.setQueuedAt(null);
+            csv.setProcessedAt(LocalDateTime.now());
+            csv.setErrorDetails(errorMessage);
+            csvUploadRepository.save(csv);
+        });
+
+        campaignRepository.findById(queueEntry.getCampaignId()).ifPresent(campaign -> {
+            campaign.setStatus("FAILED");
+            campaignRepository.save(campaign);
+        });
+
+        try {
+            campaignDashboardStatsService.recordCampaignOutcome(updated);
+        } catch (Exception ex) {
+            log.error("Stats persistence failed on failure path - QueueID: {}, error: {}", queueId, ex.getMessage(), ex);
+        }
         
         log.error("Campaign failed - QueueID: {}, Error: {}", queueId, errorMessage);
         return updated;
@@ -238,6 +298,16 @@ public class QueueService {
         queueEntry.setCompletedAt(null);
         
         CampaignQueue updated = campaignQueueRepository.save(queueEntry);
+
+        csvUploadRepository.findById(queueEntry.getCsvUploadId()).ifPresent(csv -> {
+            csv.setStatus("QUEUED");
+            csv.setIsQueued(true);
+            csv.setQueuedAt(LocalDateTime.now());
+            if (csv.getQueuePosition() == null) {
+                csv.setQueuePosition(calculateNextQueuePosition());
+            }
+            csvUploadRepository.save(csv);
+        });
         
         // Log activity
         activityLogService.logCampaignReprocess(queueEntry.getUserId(), queueEntry.getCampaignId(),
@@ -262,6 +332,51 @@ public class QueueService {
         queueEntry.setFailedRecipients(failedCount);
         
         return campaignQueueRepository.save(queueEntry);
+    }
+
+    /**
+     * Force reset a stuck campaign back to QUEUED state.
+     * This is used by the frontend reset button when local and backend state diverge.
+     */
+    public CampaignQueue resetStuckCampaign(Long queueId, String reason) {
+        CampaignQueue queueEntry = campaignQueueRepository.findById(queueId)
+                .orElseThrow(() -> new IllegalArgumentException("Queue entry not found: " + queueId));
+
+        String previousStatus = queueEntry.getStatus();
+
+        queueEntry.setStatus("QUEUED");
+        queueEntry.setPauseReason(reason);
+        queueEntry.setErrorMessage(null);
+        queueEntry.setStartedAt(null);
+        queueEntry.setCompletedAt(null);
+        queueEntry.setCurrentRow(0);
+        queueEntry.setProcessedRecipients(0);
+        queueEntry.setSentRecipients(0);
+        queueEntry.setFailedRecipients(0);
+
+        CampaignQueue updated = campaignQueueRepository.save(queueEntry);
+
+        csvUploadRepository.findById(queueEntry.getCsvUploadId()).ifPresent(csv -> {
+            csv.setStatus("QUEUED");
+            csv.setIsQueued(true);
+            if (csv.getQueuePosition() == null) {
+                csv.setQueuePosition(calculateNextQueuePosition());
+            }
+            csv.setQueuedAt(LocalDateTime.now());
+            csv.setProcessedAt(null);
+            csv.setErrorDetails(null);
+            csvUploadRepository.save(csv);
+        });
+
+        campaignRepository.findById(queueEntry.getCampaignId()).ifPresent(campaign -> {
+            campaign.setStatus("QUEUED");
+            campaignRepository.save(campaign);
+        });
+
+        log.warn("Campaign force-reset - QueueID: {}, previousStatus: {}, reason: {}",
+                queueId, previousStatus, reason);
+
+        return updated;
     }
     
     /**

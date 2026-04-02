@@ -183,6 +183,9 @@
                                 <li>Google will generate a 16-character app password</li>
                                 <li>Copy and paste it above</li>
                             </ol>
+                            <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 12px 0; border-radius: 4px;">
+                                <strong>⚠️ Daily Limit:</strong> Personal Gmail accounts (@gmail.com) allow sending a maximum of <strong>500 emails per day</strong>. For higher volumes, consider using a business email or Google Workspace account.
+                            </div>
                             <p>📖 <a href="https://support.google.com/accounts/answer/185833" target="_blank">Official Google Documentation</a></p>
                         </div>
                     </div>
@@ -242,6 +245,9 @@
                                 <li>Microsoft will generate a 16-character app password</li>
                                 <li>Copy and paste it above</li>
                             </ol>
+                            <div style="background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 12px; margin: 12px 0; border-radius: 4px;">
+                                <strong>ℹ️ Daily Limit:</strong> Outlook accounts support up to <strong>10,000 emails per day</strong> for Send As/Send on Behalf operations. Standard accounts have higher limits than consumer accounts. For large-scale campaigns, verify your account type.
+                            </div>
                             <p>📖 <a href="https://support.microsoft.com/en-us/account-billing/using-app-passwords-with-your-microsoft-account" target="_blank">Microsoft App Passwords Documentation</a></p>
                         </div>
                     </div>
@@ -267,7 +273,7 @@
                     </div>
                 </div>
                 
-                <!-- Default Email Setting -->
+                <!-- Email Selection Preference -->
                 <div class="default-email-setting">
                     <h4>Email Selection Preference</h4>
                     <div class="radio-group">
@@ -355,7 +361,12 @@
                 
                 <!-- CURRENTLY RUNNING CAMPAIGN Section -->
                 <div class="stats-section">
-                    <h3 class="stats-section-title">Currently Running Campaign</h3>
+                    <div class="stats-section-header">
+                        <h3 class="stats-section-title">Currently Running Campaign</h3>
+                        <button id="clearStatsBtn" type="button" title="Clear all persisted Today and Till Date stats" aria-label="Clear Stats">
+                            <i class="fas fa-trash-can"></i>
+                        </button>
+                    </div>
                     <div class="stats-grid stats-grid-running">
                         <div class="stat-card stat-card-running">
                             <div class="stat-label">Campaign Progress</div>
@@ -479,6 +490,7 @@
 
                         <div class="compose-button-group">
                             <button type="button" class="btn btn-secondary" id="saveDraftBtn">Save Draft</button>
+                            <button type="button" class="btn btn-danger" id="clearDraftBtn">Clear Draft</button>
                         </div>
                     </form>
                 </div>
@@ -561,13 +573,18 @@ Bob Johnson,bob@example.com,Global Solutions</pre>
                 <div class="section-card">
                     <div class="terminal-header">
                         <h3>Campaign Logs Terminal</h3>
-                        <button id="clearLogsBtn" class="btn btn-secondary btn-small">
-                            <i class="fas fa-trash"></i> Clear Logs
-                        </button>
+                        <div style="display:flex; gap:0.5rem;">
+                            <button id="exportLogsBtn" class="btn btn-secondary btn-small">
+                                <i class="fas fa-download"></i> Export Logs
+                            </button>
+                            <button id="clearLogsBtn" class="btn btn-secondary btn-small">
+                                <i class="fas fa-trash"></i> Clear Logs
+                            </button>
+                        </div>
                     </div>
                     <div id="logsList" class="terminal-window">
                         <div class="terminal-content">
-                            <p class="terminal-line terminal-info">$ System ready...</p>
+                            <p class="terminal-line terminal-info">System ready...</p>
                         </div>
                     </div>
                 </div>
@@ -653,12 +670,12 @@ Bob Johnson,bob@example.com,Global Solutions</pre>
     <script src="node_modules/driver.js/dist/driver.js.iife.js"></script>
     
     <!-- API Configuration & Auth -->
-    <script src="js/api-config.js"></script>
+    <script src="js/api-config.js?v=20260401a"></script>
     
     <!-- App JS -->
-    <script src="js/app.js" defer></script>
+    <script src="js/app.js?v=20260401a" defer></script>
     
     <!-- Built-in Tour System (no external dependencies) -->
-    <script src="js/tour.js" defer></script>
+    <script src="js/tour.js?v=20260401a" defer></script>
 </body>
 </html>

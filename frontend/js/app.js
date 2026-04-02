@@ -7,6 +7,125 @@ let campaignTimeoutId = null;
 let campaignStartTime = null;          // When campaign started (timestamp)
 let campaignTimerIntervalId = null;   // Interval for timer display update
 let campaignElapsedTime = 0;          // Total elapsed time in milliseconds (preserved during pause)
+let campaignStatusPollIntervalId = null; // Poll backend queue status while campaign is active
+let dashboardDbStatsCache = {};
+
+function getCurrentUserId() {
+    const rawUserId = localStorage.getItem('userId');
+    if (rawUserId) {
+        return rawUserId;
+    }
+
+    try {
+        const userData = JSON.parse(localStorage.getItem('user_data') || '{}');
+        if (userData?.id != null) {
+            return String(userData.id);
+        }
+    } catch (error) {
+        // ignore
+    }
+
+    try {
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        if (user?.id != null) {
+            return String(user.id);
+        }
+    } catch (error) {
+        // ignore
+    }
+
+    try {
+        const token = getJwtToken();
+        if (token) {
+            const [, payload] = token.split('.');
+            if (payload) {
+                const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+                if (decoded?.userId != null) {
+                    return String(decoded.userId);
+                }
+                if (decoded?.id != null) {
+                    return String(decoded.id);
+                }
+            }
+        }
+    } catch (error) {
+        // ignore malformed token payloads
+    }
+
+    return null;
+}
+
+function buildUserIdHeader() {
+    const userId = getCurrentUserId();
+    return userId ? { 'X-User-Id': userId } : {};
+}
+
+function getCampaignTargetTotal(queue = []) {
+    const backendTotal = Number(localStorage.getItem('campaignTargetTotal') || '0');
+    if (backendTotal > 0) {
+        return backendTotal;
+    }
+
+    const processingId = localStorage.getItem('currentProcessingCSVId');
+    const currentCSV = Array.isArray(queue)
+        ? queue.find(q => String(q.id) === String(processingId))
+        : null;
+
+    if (currentCSV && Number(currentCSV.recipientCount) > 0) {
+        return Number(currentCSV.recipientCount);
+    }
+
+    return 0;
+}
+
+function getSendRangePayload() {
+    const sendTo = (document.getElementById('sendToOption')?.value || 'all').toLowerCase();
+    const rangeFrom = parseInt(document.getElementById('rangeFrom')?.value || '1', 10);
+    const rangeTo = parseInt(document.getElementById('rangeTo')?.value || '1', 10);
+
+    return {
+        sendTo,
+        rangeFrom: Number.isFinite(rangeFrom) ? rangeFrom : 1,
+        rangeTo: Number.isFinite(rangeTo) ? rangeTo : 1
+    };
+}
+
+function getCampaignLogSeqKey(queueId) {
+    return `campaignLogAfterSeq:${queueId}`;
+}
+
+function getDashboardStatsCache() {
+    return dashboardDbStatsCache || {};
+}
+
+async function refreshDashboardStatsFromBackend() {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            return getDashboardStatsCache();
+        }
+
+        const response = await fetch(`${API_BASE_URL}/campaign-queue/dashboard-stats`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...buildUserIdHeader()
+            }
+        });
+
+        if (!response.ok) {
+            return getDashboardStatsCache();
+        }
+
+        const payload = await response.json();
+        dashboardDbStatsCache = payload || {};
+        return dashboardDbStatsCache;
+    } catch (error) {
+        console.warn('[DEBUG] Failed to refresh dashboard stats from backend:', error?.message || error);
+        return getDashboardStatsCache();
+    }
+}
 
 function checkAuth() {
     // Check if user has valid JWT token (primary authentication check)
@@ -67,6 +186,7 @@ function initilizeApp() {
     setupSecurityForm();
     setupDeleteAccount();
     setupEmailSelectionPreference();
+    restoreLocalComposeDraft();
     loadSavedDraft();
     restoreLastSection();
     activityLog.load(); // Load activity log from localStorage
@@ -77,6 +197,14 @@ function initilizeApp() {
     updateDashboardStats(); // Update dashboard statistics
     activityLog.updateDisplay(); // Display activity log
     loadUserAvatarOnInit(); // Load avatar on page initialization
+    loadEmailProviders(); // Load providers + default provider immediately on startup
+    
+    // Fetch email providers from backend to ensure they persist after logout
+    // Update mail provider stat after loading to show correct provider name immediately
+    fetchEmailProvidersFromBackend(function(providers) {
+        console.log('Email providers loaded on app init:', providers);
+        updateMailProviderStat(); // Refresh provider display with loaded data
+    });
 }
 
 // SIDEBAR NAVIGATION
@@ -556,14 +684,71 @@ function updatePageTitle(section) {
     document.querySelector('.page-title').textContent = titles[section] || 'Dashboard';
 }
 
+function persistLocalComposeDraft() {
+    const subject = document.getElementById('emailSubject')?.value || '';
+    const body = document.getElementById('emailBody')?.value || '';
+    const sendTo = document.getElementById('sendToOption')?.value || 'all';
+
+    localStorage.setItem('emailDraft', JSON.stringify({
+        subject,
+        emailBody: body,
+        sendTo,
+        updatedAt: new Date().toISOString()
+    }));
+}
+
+function restoreLocalComposeDraft() {
+    try {
+        const raw = localStorage.getItem('emailDraft');
+        if (!raw) return false;
+
+        const draft = JSON.parse(raw);
+        if (!draft || (typeof draft.subject !== 'string' && typeof draft.emailBody !== 'string')) {
+            return false;
+        }
+
+        const subjectInput = document.getElementById('emailSubject');
+        const bodyInput = document.getElementById('emailBody');
+        const sendToSelect = document.getElementById('sendToOption');
+
+        if (subjectInput && !subjectInput.value) {
+            subjectInput.value = draft.subject || '';
+        }
+
+        if (bodyInput && !bodyInput.value) {
+            bodyInput.value = draft.emailBody || '';
+        }
+
+        if (sendToSelect && (draft.sendTo === 'all' || draft.sendTo === 'range')) {
+            sendToSelect.value = draft.sendTo;
+            const rangeInputs = document.getElementById('rangeInputs');
+            if (rangeInputs) {
+                rangeInputs.style.display = draft.sendTo === 'range' ? 'flex' : 'none';
+            }
+        }
+
+        updatePreview();
+        return Boolean((draft.subject || '').trim() || (draft.emailBody || '').trim());
+    } catch (error) {
+        console.warn('[DEBUG] Failed to restore local compose draft:', error?.message || error);
+        return false;
+    }
+}
+
 
 
 // EMAIL COMPOSER
 function setupForms() {
     
     // Email inputs for preview
-    document.getElementById('emailSubject')?.addEventListener('input', updatePreview);
-    document.getElementById('emailBody')?.addEventListener('input', updatePreview);
+    document.getElementById('emailSubject')?.addEventListener('input', () => {
+        updatePreview();
+        persistLocalComposeDraft();
+    });
+    document.getElementById('emailBody')?.addEventListener('input', () => {
+        updatePreview();
+        persistLocalComposeDraft();
+    });
     
     // Send To selection
     document.getElementById('sendToOption')?.addEventListener('change', (e) => {
@@ -581,16 +766,19 @@ function setupForms() {
         const rangeInputs = document.getElementById('rangeInputs');
         rangeInputs.style.display = e.target.value === 'range' ? 'flex' : 'none';
         updatePreview();
+        persistLocalComposeDraft();
         updateDashboardStats(); // Update dashboard instantly when send option changes
     });
 
     // Range inputs
     document.getElementById('rangeFrom')?.addEventListener('input', () => {
         updatePreview();
+        persistLocalComposeDraft();
         updateDashboardStats(); // Update dashboard instantly
     });
     document.getElementById('rangeTo')?.addEventListener('input', () => {
         updatePreview();
+        persistLocalComposeDraft();
         updateDashboardStats(); // Update dashboard instantly
     });
     
@@ -600,15 +788,23 @@ function setupForms() {
     
     // Clear logs button
     document.getElementById('clearLogsBtn')?.addEventListener('click', clearTerminalLogs);
+    document.getElementById('exportLogsBtn')?.addEventListener('click', exportTerminalLogs);
+    document.getElementById('clearStatsBtn')?.addEventListener('click', handleClearDashboardStats);
     
     // CSV upload
     setupCSVUpload();
     
     // Load CSV files from backend (sync with database, not just localStorage)
-    loadCSVQueueFromBackend();
+    syncCSVQueueFromBackend().then(() => {
+        refreshDashboardStatsFromBackend().finally(() => {
+            updateCSVQueueDisplay();
+            updateDashboardStats();
+        });
+    });
 
     // Save Draft button
     document.getElementById('saveDraftBtn')?.addEventListener('click', handleSaveDraft);
+    document.getElementById('clearDraftBtn')?.addEventListener('click', handleClearDraft);
 }
 
 /**
@@ -638,6 +834,290 @@ function updateCampaignButtonIcons(state) {
             startBtn.querySelector('i').className = 'fas fa-play';
         }
     }
+}
+
+function setCampaignRunningUI(isResume = false) {
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const campaignStatus = document.getElementById('campaignStatus');
+
+    if (startBtn) {
+        startBtn.style.display = 'none';
+        startBtn.disabled = false;
+    }
+    if (pauseBtn) {
+        pauseBtn.style.display = 'inline-flex';
+    }
+    if (campaignStatus) {
+        campaignStatus.textContent = 'Campaign running...';
+        campaignStatus.className = 'campaign-status running';
+    }
+
+    updateCampaignButtonIcons('running');
+    startCampaignTimer(isResume);
+    startCampaignStatusPolling();
+}
+
+function startCampaignStatusPolling() {
+    if (campaignStatusPollIntervalId) {
+        clearInterval(campaignStatusPollIntervalId);
+        campaignStatusPollIntervalId = null;
+    }
+
+    campaignStatusPollIntervalId = setInterval(async () => {
+        try {
+            const queueId = localStorage.getItem('currentQueueId');
+            const token = getJwtToken();
+            if (queueId && token) {
+                const response = await fetch(`${API_BASE_URL}/campaign-queue/${queueId}/status`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const statusData = await response.json();
+                    const processed = Number(statusData.processedRecipients ?? statusData.currentRow ?? 0);
+                    const sent = Number(statusData.sentRecipients ?? statusData.sent ?? 0);
+                    const failed = Number(statusData.failedRecipients ?? statusData.failed ?? 0);
+                    const totalRecipients = Number(statusData.totalRecipients ?? statusData.totalRows ?? 0);
+                    const queueStatus = String(statusData.status || '').toUpperCase();
+
+                    localStorage.setItem('csvProgress', String(processed));
+                    localStorage.setItem('campaignSentProgress', String(sent));
+                    if (totalRecipients > 0) {
+                        localStorage.setItem('campaignTargetTotal', String(totalRecipients));
+                    }
+
+                    await pollCampaignRuntimeEvents(queueId);
+
+                    const sessionLogs = JSON.parse(localStorage.getItem('currentSessionLogs') || '{}');
+                    sessionLogs.successCount = sent;
+                    sessionLogs.failureCount = failed;
+                    localStorage.setItem('currentSessionLogs', JSON.stringify(sessionLogs));
+
+                    await refreshDashboardStatsFromBackend();
+                    updateDashboardStats();
+
+                    if (queueStatus === 'COMPLETED') {
+                        stopCampaignStatusPolling();
+                        onCampaignComplete();
+                        return;
+                    }
+
+                    if (queueStatus === 'FAILED') {
+                        stopCampaignStatusPolling();
+                        stopCampaignTimer();
+                        const startBtn = document.getElementById('startBtn');
+                        const pauseBtn = document.getElementById('pauseBtn');
+                        const campaignStatus = document.getElementById('campaignStatus');
+                        if (startBtn) startBtn.style.display = 'inline-flex';
+                        if (pauseBtn) pauseBtn.style.display = 'none';
+                        if (campaignStatus) {
+                            campaignStatus.textContent = 'Campaign failed';
+                            campaignStatus.className = 'campaign-status error';
+                        }
+                        localStorage.removeItem('campaignTargetTotal');
+                        localStorage.removeItem('currentProcessingCSVId');
+                        localStorage.removeItem('currentQueueId');
+                        syncCSVQueueFromBackend().then(async (queue) => {
+                            await refreshDashboardStatsFromBackend();
+                            updateCSVQueueDisplay(queue);
+                            updateDashboardStats(queue);
+                        });
+                        return;
+                    }
+
+                    if (queueStatus === 'PAUSED') {
+                        localStorage.setItem('campaignPaused', 'true');
+                        syncCampaignControlUI();
+                    }
+                }
+            }
+
+            // Fallback: if backend status endpoint path misses completion, reconcile from queue list status.
+            const processingCsvId = Number(localStorage.getItem('currentProcessingCSVId') || '0');
+            if (processingCsvId > 0) {
+                const queue = await syncCSVQueueFromBackend();
+                const currentCsv = Array.isArray(queue)
+                    ? queue.find(item => Number(item?.id) === processingCsvId)
+                    : null;
+                const reconciledStatus = normalizeCsvStatus(currentCsv?.status);
+
+                if (reconciledStatus === 'completed') {
+                    stopCampaignStatusPolling();
+                    onCampaignComplete();
+                    return;
+                }
+
+                if (reconciledStatus === 'failed') {
+                    stopCampaignStatusPolling();
+                    stopCampaignTimer();
+                    localStorage.removeItem('campaignTargetTotal');
+                    localStorage.removeItem('currentProcessingCSVId');
+                    localStorage.removeItem('currentQueueId');
+                    const startBtn = document.getElementById('startBtn');
+                    const pauseBtn = document.getElementById('pauseBtn');
+                    const campaignStatus = document.getElementById('campaignStatus');
+                    if (startBtn) startBtn.style.display = 'inline-flex';
+                    if (pauseBtn) pauseBtn.style.display = 'none';
+                    if (campaignStatus) {
+                        campaignStatus.textContent = 'Campaign failed';
+                        campaignStatus.className = 'campaign-status error';
+                    }
+                    await refreshDashboardStatsFromBackend();
+                    updateCSVQueueDisplay(queue);
+                    updateDashboardStats(queue);
+                    return;
+                }
+            }
+        } catch (error) {
+            console.warn('[DEBUG] Campaign status polling error:', error?.message || error);
+        }
+    }, 1500);
+}
+
+async function pollCampaignRuntimeEvents(queueId) {
+    try {
+        const token = getJwtToken();
+        if (!token || !queueId) {
+            return;
+        }
+
+        const seqKey = getCampaignLogSeqKey(queueId);
+        const afterSeq = Number(localStorage.getItem(seqKey) || '0');
+        const response = await fetch(`${API_BASE_URL}/campaign-queue/${queueId}/events?afterSeq=${afterSeq}&limit=100`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        const payload = await response.json();
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        if (events.length === 0) {
+            return;
+        }
+
+        events.forEach((event) => {
+            appendBackendRuntimeEventToTerminal(event);
+        });
+
+        localStorage.setItem(seqKey, String(payload.nextSeq || afterSeq));
+    } catch (error) {
+        console.warn('[DEBUG] Runtime events polling error:', error?.message || error);
+    }
+}
+
+function appendBackendRuntimeEventToTerminal(event) {
+    const level = String(event?.level || 'info').toLowerCase();
+    const type = level === 'success' ? 'success'
+        : (level === 'error' ? 'error'
+            : (level === 'warning' ? 'warning'
+                : (level === 'status' ? 'status' : 'info')));
+
+    const rowPrefix = event?.row ? `[row ${event.row}] ` : '';
+    const recipientSuffix = event?.recipientEmail ? ` (${event.recipientEmail})` : '';
+    addTerminalLog(`${rowPrefix}${event?.message || ''}${recipientSuffix}`, type);
+}
+
+async function loadPersistedCampaignLogs(limit = 200) {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            return 0;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/campaign-queue/events/recent?limit=${limit}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...buildUserIdHeader()
+            }
+        });
+
+        if (!response.ok) {
+            return 0;
+        }
+
+        const payload = await response.json();
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        if (events.length === 0) {
+            return 0;
+        }
+
+        events.forEach((event) => appendBackendRuntimeEventToTerminal(event));
+
+        const latestByQueue = new Map();
+        events.forEach((event) => {
+            if (event.queueId != null && event.seq != null) {
+                const current = Number(latestByQueue.get(String(event.queueId)) || 0);
+                const incoming = Number(event.seq || 0);
+                if (incoming > current) {
+                    latestByQueue.set(String(event.queueId), incoming);
+                }
+            }
+        });
+
+        latestByQueue.forEach((seq, queueId) => {
+            localStorage.setItem(getCampaignLogSeqKey(queueId), String(seq));
+        });
+        return events.length;
+    } catch (error) {
+        console.warn('[DEBUG] Failed to load persisted runtime logs:', error?.message || error);
+        return 0;
+    }
+}
+
+function stopCampaignStatusPolling() {
+    if (campaignStatusPollIntervalId) {
+        clearInterval(campaignStatusPollIntervalId);
+        campaignStatusPollIntervalId = null;
+    }
+}
+
+function syncCampaignControlUI(queueParam = null) {
+    const queue = Array.isArray(queueParam) ? queueParam : getCSVQueue();
+    const startBtn = document.getElementById('startBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const campaignStatus = document.getElementById('campaignStatus');
+    const isPaused = localStorage.getItem('campaignPaused') === 'true';
+    const processingId = localStorage.getItem('currentProcessingCSVId');
+
+    const processingCsv = queue.find(q => {
+        const status = normalizeCsvStatus(q?.status);
+        return status === 'processing' && String(q?.id) === String(processingId);
+    });
+
+    if (isPaused) {
+        if (startBtn) startBtn.style.display = 'inline-flex';
+        if (pauseBtn) pauseBtn.style.display = 'none';
+        updateCampaignButtonIcons('paused');
+        return;
+    }
+
+    if (processingCsv) {
+        if (startBtn) startBtn.style.display = 'none';
+        if (pauseBtn) pauseBtn.style.display = 'inline-flex';
+        if (campaignStatus && !campaignStatus.textContent) {
+            campaignStatus.textContent = 'Campaign running...';
+            campaignStatus.className = 'campaign-status running';
+        }
+        updateCampaignButtonIcons('running');
+        return;
+    }
+
+    if (startBtn) startBtn.style.display = 'inline-flex';
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    updateCampaignButtonIcons('idle');
 }
 
 function updatePreview() {
@@ -727,88 +1207,129 @@ function handleStartCampaign() {
         return;
     }
     
-    // Check if at least one email provider/mailer is configured
-    const emailProviders = JSON.parse(localStorage.getItem('emailProviders') || '[]');
-    if (emailProviders.length === 0) {
-        showNotification('❌ No email provider configured. Please add and verify an email provider in Settings first.', 'error');
-        return;
-    }
-    
-    // Check user's email selection preference - from DOM or localStorage
-    let emailSelectionPref = document.querySelector('input[name="emailSelection"]:checked')?.value;
-    if (!emailSelectionPref) {
-        emailSelectionPref = localStorage.getItem('emailSelectionPreference') || 'default';
-    }
-    
-    console.log('[DEBUG] Email selection preference:', emailSelectionPref);
-    
-    // Always ask for email provider if preference is "prompt" (regardless of number of providers)
-    if (emailSelectionPref === 'prompt') {
-        console.log('[DEBUG] Showing email selection modal (prompt mode)');
-        showEmailSelectionModal();
-        return;
-    }
-    
-    // Using default email provider
-    
-    // If no default provider is selected, select the first one
-    if (!localStorage.getItem('selectedEmailProvider')) {
-        localStorage.setItem('selectedEmailProvider', emailProviders[0].id);
-    }
-    
-    // Check if at least one CSV is in the queue
-    const csvQueue = getCSVQueue();
-    if (csvQueue.length === 0) {
-        showNotification('❌ No CSV uploaded. Please upload a CSV file to the queue first.', 'error');
-        return;
-    }
-    
-    const recipients = JSON.parse(localStorage.getItem('recipients') || '[]');
-    
-    if (recipients.length === 0) {
-        showNotification('Please upload recipients first', 'error');
-        return;
-    }
-    
-    const subject = document.getElementById('emailSubject')?.value?.trim();
-    const body = document.getElementById('emailBody')?.value?.trim();
-    const sendTo = document.getElementById('sendToOption')?.value;
-    
-    if (!subject || !body) {
-        showNotification('Please fill in subject and body', 'error');
-        return;
-    }
-    
-    // Validate range if custom range is selected
-    if (sendTo === 'range') {
-        const rangeFrom = parseInt(document.getElementById('rangeFrom')?.value || 0);
-        const rangeTo = parseInt(document.getElementById('rangeTo')?.value || 0);
-        
-        if (rangeFrom < 1) {
-            showNotification('From must be at least 1', 'error');
+    // Fetch email providers from backend to get fresh data
+    fetchEmailProvidersFromBackend(async function(providers) {
+        // Check if at least one email provider/mailer is configured
+        if (providers.length === 0) {
+            showNotification('❌ No email provider configured. Please add and verify an email provider in Settings first.', 'error');
             return;
         }
         
-        if (rangeTo < rangeFrom) {
-            showNotification('To must be greater than or equal to From', 'error');
+        // Check user's email selection preference - fetch from backend
+        let emailSelectionPref = 'default';
+        try {
+            const token = getJwtToken();
+            if (token) {
+                const response = await fetch(`${API_BASE_URL}/users/email-selection-preference`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    emailSelectionPref = data.preference || 'default';
+                    console.log('[DEBUG] Email selection preference from backend:', emailSelectionPref);
+                } else {
+                    // Fallback to localStorage
+                    emailSelectionPref = localStorage.getItem('emailSelectionPreference') || 'default';
+                    console.log('[DEBUG] Using localStorage email preference:', emailSelectionPref);
+                }
+            } else {
+                emailSelectionPref = localStorage.getItem('emailSelectionPreference') || 'default';
+            }
+        } catch (error) {
+            console.warn('[DEBUG] Error fetching email preference from backend, using localStorage:', error);
+            emailSelectionPref = localStorage.getItem('emailSelectionPreference') || 'default';
+        }
+        
+        console.log('[DEBUG] Final email selection preference:', emailSelectionPref);
+        
+        // Always ask for email provider if preference is "prompt" (regardless of number of providers)
+        if (emailSelectionPref === 'prompt') {
+            console.log('[DEBUG] Showing email selection modal (prompt mode)');
+            showEmailSelectionModal();
             return;
         }
         
-        if (rangeTo > recipients.length) {
-            showNotification(`To cannot exceed total recipients (${recipients.length})`, 'error');
+        // Using default email provider
+        
+        // If no default provider is selected, select the first one
+        if (!localStorage.getItem('selectedEmailProvider')) {
+            localStorage.setItem('selectedEmailProvider', providers[0].id);
+        }
+        
+// Check if at least one CSV is in the queue OR if there's pending CSV data
+        const csvQueue = getCSVQueue();
+        const hasPendingCSV = pendingCSVData.file && pendingCSVData.recipients.length > 0;
+        
+        if (csvQueue.length === 0 && !hasPendingCSV) {
+            showNotification('❌ No CSV uploaded. Please select a CSV file first.', 'error');
             return;
         }
-    }
+        
+        // If there's pending CSV data, remind user to confirm upload
+        if (hasPendingCSV && csvQueue.length === 0) {
+            showNotification('⚠️ CSV file selected but not uploaded yet. Please click "Confirm Upload" button first.', 'warning');
+            return;
+        }
+        
+        const recipients = JSON.parse(localStorage.getItem('recipients') || '[]');
+        const queueForValidation = getCSVQueue();
+        const activeCsv = queueForValidation.find(q => {
+            const status = normalizeCsvStatus(q?.status);
+            return status === 'pending' || status === 'processing';
+        });
+        const totalRecipientsForValidation = recipients.length > 0
+            ? recipients.length
+            : Number(activeCsv?.recipientCount || activeCsv?.totalRows || 0);
 
-    // All validations passed - now actually start the campaign
-    // All validations passed
-    
-    // If campaign is paused, resume it instead of starting fresh
-    if (isPaused && currentProcessingId) {
-        proceedWithCampaignResume();
-    } else {
-        proceedWithCampaignStart();
-    }
+        if (!isPaused && totalRecipientsForValidation <= 0) {
+            showNotification('Please upload recipients first', 'error');
+            return;
+        }
+        
+        const subject = document.getElementById('emailSubject')?.value?.trim();
+        const body = document.getElementById('emailBody')?.value || '';
+        const sendTo = document.getElementById('sendToOption')?.value;
+        
+        if (!subject || !body) {
+            showNotification('Please fill in subject and body', 'error');
+            return;
+        }
+        
+        // Validate range if custom range is selected
+        if (sendTo === 'range') {
+            const rangeFrom = parseInt(document.getElementById('rangeFrom')?.value || 0);
+            const rangeTo = parseInt(document.getElementById('rangeTo')?.value || 0);
+            
+            if (rangeFrom < 1) {
+                showNotification('From must be at least 1', 'error');
+                return;
+            }
+            
+            if (rangeTo < rangeFrom) {
+                showNotification('To must be greater than or equal to From', 'error');
+                return;
+            }
+            
+            if (rangeTo > totalRecipientsForValidation) {
+                showNotification(`To cannot exceed total recipients (${totalRecipientsForValidation})`, 'error');
+                return;
+            }
+        }
+
+        // All validations passed - now actually start the campaign
+        // All validations passed
+        
+        // If campaign is paused, resume it instead of starting fresh
+        if (isPaused && currentProcessingId) {
+            proceedWithCampaignResume();
+        } else {
+            proceedWithCampaignStart();
+        }
+    });
 }
 
 function onCampaignComplete() {
@@ -822,6 +1343,7 @@ function onCampaignComplete() {
     stopCampaignTimer();
     
     const processingId = localStorage.getItem('currentProcessingCSVId');
+    const queueId = localStorage.getItem('currentQueueId');
     
     if (processingId) {
         // Get campaign stats for activity log
@@ -844,8 +1366,11 @@ function onCampaignComplete() {
         endCSVLogging(parseInt(processingId));
         localStorage.removeItem('currentProcessingCSVId');
         localStorage.removeItem('csvProgress');
+        localStorage.removeItem('campaignSentProgress');
         localStorage.removeItem('csvStoppedAt');
         localStorage.removeItem('campaignElapsedTimeMS');  // Clear stored elapsed time
+        localStorage.removeItem('currentQueueId');
+        localStorage.removeItem('campaignTargetTotal');
         
         // Clear pause state to unlock provider for next campaign
         localStorage.removeItem('campaignPaused');
@@ -862,15 +1387,29 @@ function onCampaignComplete() {
     // Update button icons to idle state
     updateCampaignButtonIcons('idle');
     updateCurrentRunningCSV();
-    updateCSVQueueDisplay(); // Refresh queue to show completed status
-    updateDashboardStats(); // Update stats after campaign completion
+    syncCSVQueueFromBackend().then(async (queue) => {
+        await refreshDashboardStatsFromBackend();
+        updateCSVQueueDisplay(queue);
+        updateDashboardStats(queue);
+
+        // Follow-up refresh to avoid transient stale stats immediately after completion.
+        setTimeout(async () => {
+            const latestQueue = await syncCSVQueueFromBackend();
+            await refreshDashboardStatsFromBackend();
+            updateCSVQueueDisplay(latestQueue);
+            updateDashboardStats(latestQueue);
+        }, 1200);
+    });
     
     // Clear campaign state for next campaign
     localStorage.removeItem('currentProcessingCSVId');
     localStorage.removeItem('csvProgress');
+    localStorage.removeItem('campaignSentProgress');
     localStorage.removeItem('campaignPaused');
     localStorage.removeItem('campaignPausedRow');
     localStorage.removeItem('campaignElapsedTimeMS');
+    localStorage.removeItem('currentQueueId');
+    localStorage.removeItem('campaignTargetTotal');
 
     // Move to next CSV in queue and show dialog
     moveToNextCSVWithDialog();
@@ -1043,6 +1582,8 @@ function handlePauseCampaign() {
     
     // Pause the timer display (preserve elapsed time)
     pauseCampaignTimer();
+
+    const queueId = localStorage.getItem('currentQueueId');
     
     const processingId = localStorage.getItem('currentProcessingCSVId');
     const currentRow = parseInt(localStorage.getItem('csvProgress') || '0');
@@ -1090,6 +1631,33 @@ function handlePauseCampaign() {
         // Progress preserved for resume
     }
 
+    if (queueId) {
+        const token = getJwtToken();
+        fetch(`${API_BASE_URL}/campaign-queue/${queueId}/pause?reason=User paused`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(async (resp) => {
+            if (!resp.ok) {
+                return;
+            }
+            const pauseData = await resp.json().catch(() => ({}));
+            const backendStatus = String(pauseData.status || '').toUpperCase();
+            if (backendStatus === 'COMPLETED' || backendStatus === 'FAILED') {
+                stopCampaignStatusPolling();
+                onCampaignComplete();
+            }
+        })
+        .catch((err) => {
+            console.error('[DEBUG] Backend pause request failed:', err);
+        });
+    }
+
+    stopCampaignStatusPolling();
+
     // Update UI
     document.getElementById('pauseBtn').style.display = 'none';
     document.getElementById('startBtn').style.display = 'inline-flex';
@@ -1112,7 +1680,7 @@ function handleResetStuckCSV() {
     );
 }
 
-function resetStuckCSV() {
+async function resetStuckCSV() {
     // Cancel any active campaign timeout/timer
     if (campaignTimeoutId) {
         clearTimeout(campaignTimeoutId);
@@ -1122,16 +1690,80 @@ function resetStuckCSV() {
     
     // Stop the timer display and clear all timer variables immediately
     stopCampaignTimer();
+    stopCampaignStatusPolling();
     
     // Reset any stuck CSV that's in processing state
     const processingId = localStorage.getItem('currentProcessingCSVId');
     const queue = getCSVQueue();
+    const processingCsvId = processingId ? parseInt(processingId, 10) : null;
+    let backendQueueId = Number(localStorage.getItem('currentQueueId') || '0') || null;
+
+    // Recovery path: if queueId is missing/stale in local storage, get currently running queue from backend.
+    if (!backendQueueId) {
+        try {
+            const token = getJwtToken();
+            if (token) {
+                const statsResp = await fetch(`${API_BASE_URL}/campaign-queue/dashboard-stats`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                        ...buildUserIdHeader()
+                    }
+                });
+
+                if (statsResp.ok) {
+                    const statsPayload = await statsResp.json().catch(() => ({}));
+                    const running = statsPayload?.running || null;
+                    const runningQueueId = Number(running?.queueId || 0) || null;
+                    const runningCsvId = Number(running?.csvUploadId || 0) || null;
+
+                    if (runningQueueId && (!processingCsvId || !runningCsvId || runningCsvId === processingCsvId)) {
+                        backendQueueId = runningQueueId;
+                        localStorage.setItem('currentQueueId', String(runningQueueId));
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('[DEBUG] Could not recover backend queue id during reset:', err);
+        }
+    }
+
+    if (backendQueueId) {
+        try {
+            const token = getJwtToken();
+            const userId = getCurrentUserId();
+            const response = await fetch(`${API_BASE_URL}/campaign-queue/${backendQueueId}/reset`, {
+                method: 'POST',
+                headers: {
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                    'Content-Type': 'application/json',
+                    ...(userId ? { 'X-User-Id': userId } : {})
+                },
+                body: JSON.stringify({ reason: 'Manual reset from dashboard' })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `Reset failed (${response.status})`);
+            }
+
+            addTerminalLog(`Backend reset acknowledged for queue ${backendQueueId}`, 'info');
+        } catch (error) {
+            console.error('[DEBUG] Failed to reset campaign on backend:', error);
+            showNotification(`❌ Failed to reset backend campaign: ${error.message}`, 'error');
+            return;
+        }
+    } else if (processingCsvId) {
+        showNotification('❌ Could not identify backend queue for reset. Please refresh and try again.', 'error');
+        return;
+    }
     
-    if (processingId) {
-        const csv = queue.find(q => q.id === parseInt(processingId));
+    if (processingCsvId) {
+        const csv = queue.find(q => q.id === processingCsvId);
         if (csv && csv.status === 'processing') {
             // Set CSV back to pending state
-            setCSVPending(parseInt(processingId));
+            setCSVPending(processingCsvId);
             addTerminalLog(`CSV reset by user - forcefully cleared from processing state back to pending`, 'warning');
             activityLog.add(`CSV manually reset: ${csv.name} - returned to pending`, 'warning', 'sync');
         }
@@ -1140,12 +1772,15 @@ function resetStuckCSV() {
     // Clear all processing-related data including timer data
     localStorage.removeItem('currentProcessingCSVId');
     localStorage.removeItem('csvProgress');
+    localStorage.removeItem('campaignSentProgress');
     localStorage.removeItem('currentSessionLogs');
     localStorage.removeItem('csvStoppedAt');
     localStorage.removeItem('campaignPaused');
     localStorage.removeItem('campaignPausedRow');
     localStorage.removeItem('campaignEmailProvider');
     localStorage.removeItem('campaignElapsedTimeMS');  // Clear stored elapsed time
+    localStorage.removeItem('currentQueueId');
+    localStorage.removeItem('campaignTargetTotal');
     
     // Re-enable provider selector
     const providerSelect = document.getElementById('providerType');
@@ -1158,6 +1793,8 @@ function resetStuckCSV() {
     
     // Update displays
     updateCurrentRunningCSV();
+    await syncCSVQueueFromBackend();
+    await refreshDashboardStatsFromBackend();
     updateCSVQueueDisplay();
     updateDashboardStats();  // Update stats after reset
     showNotification('✅ Stuck CSV reset and moved back to pending', 'success');
@@ -1165,7 +1802,7 @@ function resetStuckCSV() {
 
 async function handleSaveDraft() {
     const subject = document.getElementById('emailSubject')?.value?.trim();
-    const body = document.getElementById('emailBody')?.value?.trim();
+    const body = document.getElementById('emailBody')?.value || '';
     const saveDraftBtn = document.getElementById('saveDraftBtn');
     const originalText = saveDraftBtn?.textContent;
 
@@ -1235,17 +1872,34 @@ async function handleSaveDraft() {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
-            const errorMessage = errorData.error || 'Failed to save draft';
-            console.error('[DEBUG] Draft save failed:', errorMessage);
-            
-            // ============ RESTORE BUTTON STATE ============
-            if (saveDraftBtn) {
-                saveDraftBtn.textContent = originalText;
-                saveDraftBtn.disabled = false;
+            const errorMessage = String(errorData.error || 'Failed to save draft');
+
+            // If existing draft ID is stale/non-draft, create a fresh draft instead of failing.
+            if (isUpdate) {
+                const fallbackResponse = await fetch(`${API_BASE_URL}/campaigns/draft/save`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(draftData)
+                });
+
+                if (!fallbackResponse.ok) {
+                    const fallbackError = await fallbackResponse.json().catch(() => ({}));
+                    const fallbackMessage = fallbackError.error || errorMessage;
+                    console.error('[DEBUG] Draft fallback save failed:', fallbackMessage);
+                    showNotification('❌ Failed to save draft: ' + fallbackMessage, 'error');
+                    return;
+                }
+
+                response = fallbackResponse;
+                isUpdate = false;
+            } else {
+                console.error('[DEBUG] Draft save failed:', errorMessage);
+                showNotification('❌ Failed to save draft: ' + errorMessage, 'error');
+                return;
             }
-            
-            showNotification('❌ Failed to save draft: ' + errorMessage, 'error');
-            return;
         }
 
         const backendResponse = await response.json();
@@ -1254,6 +1908,7 @@ async function handleSaveDraft() {
         // Store draft ID for future updates
         const draftId = backendResponse.campaignId || lastDraftId;
         localStorage.setItem('lastDraftId', draftId?.toString());
+        persistLocalComposeDraft();
 
         // Show success message
         const displaySubject = subject.substring(0, 30) + (subject.length > 30 ? '...' : '');
@@ -1286,9 +1941,9 @@ async function loadSavedDraft() {
         const token = getJwtToken();
         if (!token) return; // User not logged in yet
 
-        // Fetch campaigns from backend
+        // Fetch latest draft from backend
         console.log('[DEBUG] Loading saved draft from backend...');
-        const response = await fetch(`${API_BASE_URL}/campaigns`, {
+        const response = await fetch(`${API_BASE_URL}/campaigns/draft/latest`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -1297,23 +1952,19 @@ async function loadSavedDraft() {
         });
 
         if (!response.ok) {
-            console.error('Failed to fetch campaigns');
+            console.error('Failed to fetch latest draft');
+            restoreLocalComposeDraft();
             return;
         }
 
         const data = await response.json();
-        const campaigns = data.campaigns || [];
-        
-        // Find the most recent DRAFT campaign
-        const draftCampaigns = campaigns.filter(c => c.status === 'DRAFT');
-        if (draftCampaigns.length === 0) {
+        const draft = data?.draft || null;
+
+        if (!draft || data?.hasDraft === false) {
             console.log('[DEBUG] No draft campaigns found');
+            restoreLocalComposeDraft();
             return;
         }
-
-        // Sort by createdAt descending to get the most recent
-        draftCampaigns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        const draft = draftCampaigns[0];
 
         console.log('[DEBUG] Found draft:', draft);
 
@@ -1330,6 +1981,13 @@ async function loadSavedDraft() {
         if (bodyInput) bodyInput.value = draft.emailBody || '';
         if (sendToSelect) sendToSelect.value = 'all'; // Default to all recipients
 
+        localStorage.setItem('emailDraft', JSON.stringify({
+            subject: draft.subject || '',
+            emailBody: draft.emailBody || '',
+            sendTo: 'all',
+            updatedAt: new Date().toISOString()
+        }));
+
         // Update preview with loaded draft
         updatePreview();
         
@@ -1339,16 +1997,76 @@ async function loadSavedDraft() {
             rangeInputs.style.display = 'flex';
         }
         
-        // Show notification about loaded draft
-        const createdTime = new Date(draft.createdAt).toLocaleString();
-        showNotification(`📋 Draft loaded from database: "${draft.subject.substring(0, 30)}..." (Saved: ${createdTime})`, 'info', 3000);
-        
         // Update dashboard instantly when draft is loaded
         updateDashboardStats();
     } catch (error) {
         console.error('[DEBUG] Error loading saved draft:', error);
+        restoreLocalComposeDraft();
         // Silently fail - don't block app loading
     }
+}
+
+async function handleClearDraft() {
+    const clearBtn = document.getElementById('clearDraftBtn');
+    const originalLabel = clearBtn?.innerHTML;
+
+    showConfirmModal(
+        '⚠️ Clear Draft?',
+        'This will delete your saved compose draft from database and clear local draft data.',
+        async () => {
+            try {
+                const token = getJwtToken();
+                if (!token) {
+                    showNotification('❌ Not logged in. Please login first.', 'error');
+                    return;
+                }
+
+                if (clearBtn) {
+                    clearBtn.disabled = true;
+                    clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                }
+
+                const response = await fetch(`${API_BASE_URL}/campaigns/draft`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Failed to clear draft (${response.status})`);
+                }
+
+                localStorage.removeItem('lastDraftId');
+                localStorage.removeItem('emailDraft');
+
+                const subjectInput = document.getElementById('emailSubject');
+                const bodyInput = document.getElementById('emailBody');
+                const sendToSelect = document.getElementById('sendToOption');
+                const rangeInputs = document.getElementById('rangeInputs');
+
+                if (subjectInput) subjectInput.value = '';
+                if (bodyInput) bodyInput.value = '';
+                if (sendToSelect) sendToSelect.value = 'all';
+                if (rangeInputs) rangeInputs.style.display = 'none';
+
+                updatePreview();
+                showNotification('✅ Draft cleared successfully', 'success');
+            } catch (error) {
+                showNotification(`❌ ${error.message}`, 'error');
+            } finally {
+                if (clearBtn) {
+                    clearBtn.disabled = false;
+                    clearBtn.innerHTML = originalLabel || 'Clear Draft';
+                }
+            }
+        },
+        null,
+        'Clear Draft',
+        'Cancel'
+    );
 }
 
 /**
@@ -1372,11 +2090,13 @@ function handleLogout() {
     localStorage.removeItem('selectedEmailProvider');
     localStorage.removeItem('emailSelectionPreference');
     localStorage.removeItem('emailDraft');
+    localStorage.removeItem('lastDraftId');
     localStorage.removeItem('csvQueue');
     localStorage.removeItem('recipients');
     localStorage.removeItem('campaigns');
     localStorage.removeItem('currentSessionLogs');
     localStorage.removeItem('lifetimeStats');
+    dashboardDbStatsCache = {};
     localStorage.removeItem('dashboardActivityLog');
     localStorage.removeItem('lastSection');
     
@@ -1396,7 +2116,8 @@ function handleLogout() {
 let pendingCSVData = {
     fileName: '',
     recipients: [],
-    lines: []
+    lines: [],
+    file: null  // Store the actual File object for backend submission
 };
 
 function setupCSVUpload() {
@@ -1430,55 +2151,167 @@ function setupCSVUpload() {
     loadCSVQueue();
 }
 
-function getCSVQueue() {
-    return JSON.parse(localStorage.getItem('csvQueue') || '[]');
-}
+// Fetch CSV queue from backend database
+function normalizeCsvStatus(status) {
+    const normalized = String(status || '').toLowerCase();
 
-function saveCSVQueue(queue) {
-    localStorage.setItem('csvQueue', JSON.stringify(queue));
-    updateCSVQueueDisplay();
-    updateDashboardStats();
-}
-
-function addToCSVQueue(name, recipients, uploadId = null) {
-    const queue = getCSVQueue();
-    
-    if (queue.length >= 5) {
-        showNotification('Maximum 5 CSV files allowed in queue', 'error');
-        return false;
+    if (normalized === 'queued' || normalized === 'queue') {
+        return 'pending';
+    }
+    if (normalized === 'in_progress' || normalized === 'in-progress') {
+        return 'processing';
+    }
+    if (normalized === 'done') {
+        return 'completed';
     }
 
-    const csvItem = {
-        id: uploadId || Date.now(), // Use real database ID if provided, fallback to timestamp
-        name: name,
-        recipients: recipients,
-        recipientCount: recipients.length,
-        status: 'pending',
-        uploadedAt: new Date().toLocaleString(),
-        completedAt: null,
-        databaseId: uploadId // Store both for clarity
-    };
+    return normalized || 'pending';
+}
 
-    queue.push(csvItem);
-    saveCSVQueue(queue);
-    
-    // Log activity
-    activityLog.add(`CSV uploaded: ${name} (${recipients.length} recipients)`, 'info', 'file-csv');
-    
-    // Update displays instantly
-    updateCSVQueueDisplay();
-    updateDashboardStats();
-    
-    showNotification(`CSV "${name}" added to queue`, 'success');
-    return true;
+// Get CSV queue from LOCAL CACHE - synchronous, returns immediately
+function getCSVQueue() {
+    const cached = localStorage.getItem('csvQueue');
+    const queue = cached ? JSON.parse(cached) : [];
+    if (!Array.isArray(queue)) {
+        return [];
+    }
+    return queue.map(item => ({
+        ...item,
+        status: normalizeCsvStatus(item?.status)
+    }));
+}
+
+// Fetch CSV queue from BACKEND and update cache - call this when you need fresh data from server
+async function syncCSVQueueFromBackend() {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            console.warn('[CSV QUEUE] No token, skipping backend sync');
+            return getCSVQueue(); // Return cached version
+        }
+        
+        const response = await fetch(`${API_BASE_URL}/csv/queue`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            console.warn('[CSV QUEUE] Failed to sync from backend:', response.status);
+            return getCSVQueue(); // Return cached version on error
+        }
+
+        const data = await response.json();
+        console.log('[CSV QUEUE] Backend queue:', data);
+
+        // Convert backend format to frontend format
+        if (data.queue && Array.isArray(data.queue)) {
+            const queue = data.queue.map(csv => ({
+                id: csv.id,
+                name: csv.name,
+                databaseId: csv.id,
+                status: normalizeCsvStatus(csv.status),
+                uploadedAt: new Date(csv.uploadedAt).toLocaleString(),
+                completedAt: null,
+                recipients: [],
+                recipientCount: csv.recipientCount || csv.recipients || 0,
+                totalRows: csv.recipients || 0,
+                queuePosition: csv.queuePosition
+            }));
+
+            console.log('[CSV QUEUE] Loaded', queue.length, 'items from backend');
+            console.log('[CSV QUEUE] Queue items after mapping:', queue.map(q => ({ id: q.id, name: q.name })));
+            localStorage.setItem('csvQueue', JSON.stringify(queue));
+            console.log('[CSV QUEUE] Stored in localStorage:', JSON.parse(localStorage.getItem('csvQueue')).map(q => ({ id: q.id, name: q.name })));
+            return queue;
+        }
+        
+        return getCSVQueue(); // Return cached version
+    } catch (error) {
+        console.error('[CSV QUEUE] Sync error:', error);
+        return getCSVQueue(); // Return cached version on error
+    }
+}
+
+// Save happens automatically via API calls now
+async function saveCSVQueue(queue) {
+    // localStorage cache is updated by individual API calls
+    if (!Array.isArray(queue)) {
+        queue = [];
+    }
+    localStorage.setItem('csvQueue', JSON.stringify(queue));
+    updateCSVQueueDisplay(queue);
+    updateDashboardStats(queue);
+}
+
+// Add CSV to queue via API
+async function addToCSVQueue(name, recipients, uploadId = null) {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('❌ Not logged in. Please login first.', 'error');
+            window.location.href = 'auth.html';
+            return false;
+        }
+        
+        if (!uploadId) {
+            showNotification('❌ Invalid CSV ID', 'error');
+            return false;
+        }
+        
+        console.log('[CSV QUEUE] Adding', uploadId, 'to queue. Type:', typeof uploadId, 'Value:', uploadId);
+        
+        // Ensure uploadId is a number
+        const numericUploadId = Number(uploadId);
+        if (isNaN(numericUploadId)) {
+            console.error('[CSV QUEUE] Invalid uploadId - not a number:', uploadId);
+            showNotification('❌ Invalid CSV ID format', 'error');
+            return false;
+        }
+        
+        const url = `${API_BASE_URL}/csv/queue/${numericUploadId}`;
+        console.log('[CSV QUEUE] Making request to URL:', url);
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('[CSV QUEUE] Successfully added to queue:', data);
+            
+            // Refresh queue display from backend
+            await syncCSVQueueFromBackend();
+            updateCSVQueueDisplay();
+            updateDashboardStats();
+            
+            showNotification(`✅ CSV "${name}" added to queue`, 'success');
+            activityLog.add(`CSV uploaded: ${name} (${recipients.length} recipients)`, 'info', 'file-csv');
+            
+            return true;
+        } else {
+            const error = await response.json();
+            showNotification(`❌ ${error.error || 'Failed to add to queue'}`, 'error');
+            console.error('[CSV QUEUE] Add failed:', error);
+            return false;
+        }
+    } catch (error) {
+        showNotification(`❌ Error adding to queue: ${error.message}`, 'error');
+        console.error('[CSV QUEUE] API error:', error);
+        return false;
+    }
 }
 
 async function removeFromCSVQueue(id) {
-    const queue = getCSVQueue();
-    const item = queue.find(q => q.id === id);
-
     // Cannot remove if processing
-    if (item && item.status === 'processing') {
+    const processingId = localStorage.getItem('currentProcessingCSVId');
+    if (processingId && parseInt(processingId) === id) {
         showNotification('Cannot remove CSV while processing. Stop the campaign first.', 'error');
         return false;
     }
@@ -1491,7 +2324,7 @@ async function removeFromCSVQueue(id) {
         deleteIcon.className = 'fas fa-spinner fa-spin'; // Show spinner
     }
 
-    // ============ DELETE FROM BACKEND FIRST ============
+    // ============ REMOVE FROM QUEUE VIA API ============
     try {
         const token = getJwtToken();
         if (!token) {
@@ -1504,8 +2337,9 @@ async function removeFromCSVQueue(id) {
             return false;
         }
 
-        console.log('[DEBUG] Deleting CSV from backend - ID:', id, 'Name:', item?.name);
-        const response = await fetch(API_ENDPOINTS.CSV_DELETE(id), {
+        console.log('[CSV QUEUE] Removing from queue - ID:', id);
+        
+        const response = await fetch(`${API_BASE_URL}/csv/queue/${id}`, {
             method: 'DELETE',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -1516,7 +2350,7 @@ async function removeFromCSVQueue(id) {
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             const errorMessage = errorData.error || `Delete failed with status ${response.status}`;
-            console.error('[DEBUG] Backend delete failed:', errorMessage);
+            console.error('[CSV QUEUE] Removal failed:', errorMessage);
             
             // ============ RESTORE BUTTON STATE ON ERROR ============
             if (deleteBtn) {
@@ -1524,15 +2358,23 @@ async function removeFromCSVQueue(id) {
                 deleteIcon.className = 'fas fa-trash'; // Restore icon
             }
             
-            showNotification('❌ Delete failed: ' + errorMessage, 'error');
+            showNotification('❌ Failed to remove from queue: ' + errorMessage, 'error');
             return false;
         }
 
         const backendResponse = await response.json();
-        console.log('[DEBUG] Backend delete successful:', backendResponse);
+        console.log('[CSV QUEUE] Successfully removed from queue:', backendResponse);
+        
+        // Refresh queue display from backend
+        await syncCSVQueueFromBackend();
+        updateCSVQueueDisplay();
+        updateDashboardStats();
+        
+        showNotification('✅ CSV removed from queue', 'success');
+        return true;
         
     } catch (error) {
-        console.error('[DEBUG] Delete error:', error);
+        console.error('[CSV QUEUE] Removal error:', error);
         
         // ============ RESTORE BUTTON STATE ON ERROR ============
         if (deleteBtn) {
@@ -1540,21 +2382,9 @@ async function removeFromCSVQueue(id) {
             deleteIcon.className = 'fas fa-trash'; // Restore icon
         }
         
-        showNotification('❌ Delete failed: ' + error.message, 'error');
+        showNotification('❌ Failed to remove from queue: ' + error.message, 'error');
         return false;
     }
-
-    // ============ BACKEND DELETE SUCCESSFUL - NOW REMOVE FROM LOCAL QUEUE ============
-    const newQueue = queue.filter(q => q.id !== id);
-    saveCSVQueue(newQueue);
-    
-    // Update displays instantly
-    updateCSVQueueDisplay();
-    updateDashboardStats();
-    
-    console.log('[DEBUG] CSV removed from local queue - ID:', id);
-    showNotification('✅ CSV deleted from database and storage', 'success');
-    return true;
 }
 
 function setCSVProcessing(id) {
@@ -1578,19 +2408,55 @@ function setCSVCompleted(id) {
     }
 }
 
-function reprocessCSV(id) {
-    // Convert a completed CSV back to pending status
-    const queue = getCSVQueue();
-    const item = queue.find(q => q.id === id);
-    
-    if (item && item.status === 'completed') {
-        item.status = 'pending';
-        item.completedAt = null;
-        saveCSVQueue(queue);
-        activityLog.add(`CSV re-added to queue: ${item.name} (${item.recipientCount} recipients)`, 'info', 'redo');
-        showNotification(`✅ ${item.name} has been re-added to the pending queue`, 'success');
-        updateCSVQueueDisplay();
-        updateDashboardStats(); // Update stats instantly to show file name and count
+function reprocessCSV(id, buttonEl) {
+    return reprocessCSVAsync(id, buttonEl);
+}
+
+async function reprocessCSVAsync(id, buttonEl) {
+    const originalLabel = buttonEl?.innerHTML;
+    if (buttonEl) {
+        buttonEl.disabled = true;
+        buttonEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    }
+
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('❌ Not logged in. Please login again.', 'error');
+            window.location.href = 'auth.html';
+            return;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/csv/queue/${id}`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const msg = errorData.error || `Reprocess failed (${response.status})`;
+            showNotification(`❌ ${msg}`, 'error');
+            return;
+        }
+
+        const refreshedQueue = await syncCSVQueueFromBackend();
+        const updatedItem = refreshedQueue.find(q => String(q.id) === String(id));
+        const name = updatedItem?.name || `CSV ${id}`;
+
+        activityLog.add(`CSV re-added to queue: ${name}`, 'info', 'redo');
+        showNotification(`✅ ${name} has been re-added to queue`, 'success');
+        updateCSVQueueDisplay(refreshedQueue);
+        updateDashboardStats(refreshedQueue);
+    } catch (error) {
+        showNotification(`❌ Failed to reprocess CSV: ${error.message}`, 'error');
+    } finally {
+        if (buttonEl) {
+            buttonEl.disabled = false;
+            buttonEl.innerHTML = originalLabel || '<i class="fas fa-redo"></i>';
+        }
     }
 }
 
@@ -1605,19 +2471,46 @@ function setCSVPending(id) {
     }
 }
 
-function updateCSVQueueDisplay() {
-    const queue = getCSVQueue();
+function updateCSVQueueDisplay(queue) {
+    // If no queue passed, try to get from localStorage cache
+    if (!queue) {
+        queue = JSON.parse(localStorage.getItem('csvQueue') || '[]');
+    }
+    
+    // Normalize queue payload to avoid status/counter mismatches from backend/local cache
+    if (Array.isArray(queue)) {
+        queue = queue.map(csv => ({
+            ...csv,
+            status: normalizeCsvStatus(csv?.status),
+            recipientCount: Number(csv?.recipientCount ?? csv?.totalRows ?? csv?.recipients ?? 0) || 0
+        }));
+    }
+    
+    if (!Array.isArray(queue)) {
+        queue = [];
+    }
+    
+    console.log('[QUEUE DISPLAY] Queue items with names:', queue.map(q => ({ id: q.id, name: q.name, status: q.status, recipientCount: q.recipientCount })));
+
     const queueSection = document.getElementById('csvQueueSection');
     const queueList = document.getElementById('csvQueueList');
     const queueCount = document.getElementById('queueCount');
 
-    if (queue.length === 0) {
+    if (!Array.isArray(queue) || queue.length === 0) {
         queueSection.style.display = 'none';
         return;
     }
 
     queueSection.style.display = 'block';
-    queueCount.textContent = `(${queue.length}/5)`;
+    const activeQueueCount = queue.filter(item => item.status === 'pending' || item.status === 'processing').length;
+    queueCount.textContent = `(${activeQueueCount}/5)`;
+
+    const getStatusMeta = (status) => {
+        if (status === 'processing') return { icon: 'spinner fa-spin', label: 'Processing' };
+        if (status === 'completed') return { icon: 'check-circle', label: 'Completed' };
+        if (status === 'failed') return { icon: 'times-circle', label: 'Failed' };
+        return { icon: 'hourglass-half', label: 'Ready' };
+    };
 
     queueList.innerHTML = queue.map((item, index) => `
         <div class="queue-item ${item.status === 'completed' ? 'queue-item-completed' : ''}">
@@ -1632,16 +2525,19 @@ function updateCSVQueueDisplay() {
                         <span>•</span>
                         <span>${item.uploadedAt}</span>
                         <span class="status-badge ${item.status}">
-                            <i class="fas fa-${item.status === 'processing' ? 'spinner fa-spin' : item.status === 'completed' ? 'check-circle' : 'hourglass-half'}"></i>
-                            ${item.status === 'pending' ? '⏳ Ready' : item.status === 'processing' ? '🔄 Processing' : '✅ Completed'}
+                            <i class="fas fa-${getStatusMeta(item.status).icon}"></i>
+                            ${getStatusMeta(item.status).label}
                         </span>
                     </div>
                 </div>
             </div>
             <div class="queue-item-actions">
-                ${item.status === 'completed' ? `
-                    <button class="btn btn-secondary" onclick="reprocessCSV(${item.id})" title="Add back to pending queue">
-                        <i class="fas fa-redo"></i> Reprocess
+                ${item.status === 'completed' || item.status === 'failed' ? `
+                    <button id="reprocessBtn-${item.id}" class="btn btn-secondary" onclick="reprocessCSV(${item.id}, this)" title="Add back to pending queue">
+                        <i class="fas fa-redo"></i>
+                    </button>
+                    <button id="deleteBtn-${item.id}" class="btn btn-secondary" onclick="removeFromCSVQueue(${item.id})" title="Delete from database and storage">
+                        <i id="deleteIcon-${item.id}" class="fas fa-trash"></i>
                     </button>
                 ` : `
                     <button id="deleteBtn-${item.id}" class="btn btn-secondary" onclick="removeFromCSVQueue(${item.id})" 
@@ -1653,6 +2549,8 @@ function updateCSVQueueDisplay() {
             </div>
         </div>
     `).join('');
+
+    syncCampaignControlUI(queue);
 }
 
 function loadCSVQueue() {
@@ -1669,83 +2567,41 @@ function loadCSVQueue() {
 }
 
 /**
- * Load CSV uploads from backend and populate localStorage queue
- * Called on app initialization to sync with database
- */
-async function loadCSVQueueFromBackend() {
-    try {
-        const token = getJwtToken();
-        if (!token) {
-            console.log('[DEBUG] No token, skipping backend CSV load');
-            return;
-        }
-
-        console.log('[DEBUG] Fetching CSVs from backend...');
-        const response = await fetch(API_ENDPOINTS.CSV_LIST, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            console.warn('[DEBUG] Failed to fetch CSVs from backend:', response.status);
-            return;
-        }
-
-        const data = await response.json();
-        console.log('[DEBUG] Backend CSVs:', data);
-
-        // Convert backend format to queue format
-        if (data.uploads && Array.isArray(data.uploads)) {
-            const queue = data.uploads.map(csv => ({
-                id: csv.id,
-                name: csv.fileName,
-                databaseId: csv.id,
-                status: 'pending', // Default status for display
-                uploadedAt: new Date(csv.uploadedAt).toLocaleString(),
-                completedAt: null,
-                recipients: [], // Backend doesn't send recipients back, that's fine
-                recipientCount: csv.validRows || 0,
-                totalRows: csv.totalRows || 0,
-                validRows: csv.validRows || 0,
-                invalidRows: csv.invalidRows || 0
-            }));
-
-            console.log('[DEBUG] Loaded', queue.length, 'CSVs from backend');
-            saveCSVQueue(queue);
-            updateCSVQueueDisplay();
-            updateDashboardStats();
-        }
-    } catch (error) {
-        console.error('[DEBUG] Error loading CSVs from backend:', error);
-        // Silently fail - use localStorage as fallback
-    }
-}
-
-/**
  * Update dashboard statistics displayed at the top
  * Shows: Current Queue, Current Session Stats, Till Date Stats, and Success Rate
  */
-function updateDashboardStats() {
-    const queue = getCSVQueue();
-    const sessionLogs = JSON.parse(localStorage.getItem('currentSessionLogs') || '{}');
+function updateDashboardStats(queue) {
+    // If no queue passed, try to get from localStorage cache
+    if (!queue) {
+        queue = JSON.parse(localStorage.getItem('csvQueue') || '[]');
+    }
     
-    // Get stored lifetime stats
-    const lifetimeStats = JSON.parse(localStorage.getItem('lifetimeStats') || '{"totalSent": 0, "totalSuccess": 0, "totalFailed": 0}');
+    if (!Array.isArray(queue)) {
+        queue = [];
+    }
+
+    // Normalize queue payload to avoid status/counter mismatches from backend/local cache
+    queue = queue.map(csv => ({
+        ...csv,
+        status: normalizeCsvStatus(csv?.status),
+        recipientCount: Number(csv?.recipientCount ?? csv?.totalRows ?? csv?.recipients ?? 0) || 0
+    }));
+    
+    const dbStats = getDashboardStatsCache();
     
     // Get current processing campaign details
     const processingId = localStorage.getItem('currentProcessingCSVId');
     const csvProgress = parseInt(localStorage.getItem('csvProgress') || '0');
+    const sentProgress = parseInt(localStorage.getItem('campaignSentProgress') || '0');
     let emailsSent = 0;
     let emailsTotal = 0;
     let emailsLeft = 0;
+    let currentCSV = null;
     
     if (processingId) {
-        const currentCSV = queue.find(q => q.id === parseInt(processingId));
+        currentCSV = queue.find(q => String(q.id) === String(processingId));
         if (currentCSV && currentCSV.recipientCount > 0) {
-            emailsSent = csvProgress;
+            emailsSent = sentProgress;
             emailsTotal = currentCSV.recipientCount;
             emailsLeft = Math.max(0, emailsTotal - emailsSent);
         }
@@ -1754,7 +2610,7 @@ function updateDashboardStats() {
     // 1. Current Queue - total recipients in pending and processing CSVs
     const currentQueueCount = queue.reduce((sum, csv) => {
         if (csv.status === 'pending' || csv.status === 'processing') {
-            return sum + csv.recipientCount;
+            return sum + (Number(csv.recipientCount) || 0);
         }
         return sum;
     }, 0);
@@ -1762,25 +2618,34 @@ function updateDashboardStats() {
     // 2. Pending count - number of CSVs in pending state
     const pendingCSVCount = queue.filter(q => q.status === 'pending').length;
     
-    // 3. Sent today - from current session
-    const sentToday = sessionLogs.successCount || 0;
+    const sessionLogs = JSON.parse(localStorage.getItem('currentSessionLogs') || '{}');
+
+    // 3. Sent today - DB daily aggregate + live running queue counters
+    const runningSent = Number(dbStats?.running?.sent ?? 0) || 0;
+    const runningFailed = Number(dbStats?.running?.failed ?? 0) || 0;
+    const localSentLive = processingId ? Math.max(0, sentProgress) : 0;
+    const localFailedLive = processingId ? Math.max(0, Number(sessionLogs?.failureCount ?? 0) || 0) : 0;
+    const effectiveLiveSent = Math.max(runningSent, localSentLive);
+    const effectiveLiveFailed = Math.max(runningFailed, localFailedLive);
+    const sentToday = (Number(dbStats?.daily?.sent ?? 0) || 0) + effectiveLiveSent;
     
-    // 4. Failed today - from current session
-    const failedToday = sessionLogs.failureCount || 0;
+    // 4. Failed today - DB daily aggregate + live running queue counters
+    const failedToday = (Number(dbStats?.daily?.failed ?? 0) || 0) + effectiveLiveFailed;
     
     // 5. Failed during current campaign (same as failedToday if campaign is running)
     const failedDuringCampaign = (processingId) ? failedToday : 0;
     
-    // 6. Total sent till date
-    const totalSent = lifetimeStats.totalSent || 0;
+    // 6. Total sent till date (YTD aggregate + current running queue)
+    const totalSent = (Number(dbStats?.ytd?.sent ?? 0) || 0) + effectiveLiveSent;
     
-    // 7. Total failed till date
-    const totalFailed = lifetimeStats.totalFailed || 0;
+    // 7. Total failed till date (YTD aggregate + current running queue)
+    const totalFailed = (Number(dbStats?.ytd?.failed ?? 0) || 0) + effectiveLiveFailed;
     
     // 8. Calculate success rate till date
     let successRate = 0;
-    if (lifetimeStats.totalSent > 0) {
-        successRate = Math.round((lifetimeStats.totalSuccess / lifetimeStats.totalSent) * 100);
+    const ytdTotalForRate = totalSent + totalFailed;
+    if (ytdTotalForRate > 0) {
+        successRate = Math.round((totalSent / ytdTotalForRate) * 100);
     }
     
     // 9. Calculate success rate for today's session
@@ -1791,42 +2656,63 @@ function updateDashboardStats() {
     }
     
     // Update UI - RUNNING CAMPAIGN
-    // If campaign is running, show progress
-    // If no campaign but pending CSVs exist, show "0/{totalPendingCount}"
-    // Only show "0/0" if queue is completely empty
+    // Always display: sent / total-to-process (total from backend when available)
     let campaignProgressDisplay;
-    if (processingId && emailsTotal > 0) {
-        // Campaign running: show actual progress
-        campaignProgressDisplay = `${emailsSent}/${emailsTotal}`;
-    } else if (!processingId && currentQueueCount > 0) {
-        // No campaign running, but pending/processing CSVs exist: show 0/total ready
-        // Check if custom range is selected
-        const sendToOption = document.getElementById('sendToOption')?.value || 'all';
-        let effectiveTotal = currentQueueCount;
-        
-        if (sendToOption === 'range') {
-            // Custom range selected - calculate total based on range
-            const rangeFromInput = document.getElementById('rangeFrom')?.value || '1';
-            const rangeToInput = document.getElementById('rangeTo')?.value || '1';
-            const rangeFrom = parseInt(rangeFromInput);
-            const rangeTo = parseInt(rangeToInput);
-            effectiveTotal = Math.max(1, rangeTo - rangeFrom + 1);
-        }
-        
-        campaignProgressDisplay = `0/${effectiveTotal}`;
+    const runningFromDb = dbStats?.running || null;
+    const queueCsvToProcess = currentCSV || queue.find(csv => csv.status === 'pending' || csv.status === 'processing');
+    const pendingCsvRecipientCount = Array.isArray(pendingCSVData?.recipients) ? pendingCSVData.recipients.length : 0;
+
+    const sendToOption = document.getElementById('sendToOption')?.value || 'all';
+    const rangeFromInput = document.getElementById('rangeFrom')?.value || '1';
+    const rangeToInput = document.getElementById('rangeTo')?.value || '1';
+    const rangeFrom = Math.max(1, parseInt(rangeFromInput, 10) || 1);
+    const rangeTo = Math.max(rangeFrom, parseInt(rangeToInput, 10) || rangeFrom);
+
+    // Pick base total from backend campaign target first, else active CSV in queue, else pending file in uploader
+    const backendTargetTotal = getCampaignTargetTotal(queue);
+    const baseTotal = backendTargetTotal > 0
+        ? backendTargetTotal
+        : (queueCsvToProcess ? (Number(queueCsvToProcess.recipientCount) || 0) : pendingCsvRecipientCount);
+
+    let targetTotal = baseTotal;
+    if (sendToOption === 'range') {
+        const requestedTotal = Math.max(0, rangeTo - rangeFrom + 1);
+        targetTotal = baseTotal > 0 ? Math.min(baseTotal, requestedTotal) : requestedTotal;
+    }
+
+    if (runningFromDb && Number(runningFromDb.total) > 0) {
+        const processedCount = Math.max(0, Number(runningFromDb.processed) || 0);
+        const totalCount = Math.max(0, Number(runningFromDb.total) || 0);
+        const boundedProcessed = Math.min(processedCount, totalCount);
+        campaignProgressDisplay = `${boundedProcessed}/${totalCount}`;
+    } else if (processingId) {
+        const processedCount = Math.max(0, Number(csvProgress) || 0);
+        const boundedProcessed = targetTotal > 0 ? Math.min(processedCount, targetTotal) : processedCount;
+        campaignProgressDisplay = `${boundedProcessed}/${targetTotal}`;
+    } else if (targetTotal > 0) {
+        campaignProgressDisplay = `0/${targetTotal}`;
     } else {
-        // Queue is empty
         campaignProgressDisplay = '0/0';
     }
     document.getElementById('statCampaignProgress').textContent = campaignProgressDisplay;
     
-    // Update CSV to Process - show only pending/processing CSVs, not completed ones
+    // Update CSV to Process - only show actionable CSVs (running, pending, or current upload draft).
     let csvToProcessDisplay = 'None';
-    // Find the first pending or processing CSV (not completed)
-    const pendingOrProcessingCSV = queue.find(csv => csv.status === 'pending' || csv.status === 'processing');
-    if (pendingOrProcessingCSV) {
-        csvToProcessDisplay = pendingOrProcessingCSV.name || 'Unknown';
+    
+    // Priority 1: Show next CSV in queue (pending or processing)
+    if (runningFromDb && Number(runningFromDb.csvUploadId) > 0) {
+        const runningCsv = queue.find(csv => String(csv.id) === String(runningFromDb.csvUploadId));
+        csvToProcessDisplay = runningCsv?.name || csvToProcessDisplay;
     }
+
+    if (csvToProcessDisplay === 'None' && queueCsvToProcess) {
+        csvToProcessDisplay = queueCsvToProcess.name || 'Unknown';
+    }
+    // Priority 2: Show pending CSV being uploaded
+    else if (pendingCSVData?.fileName) {
+        csvToProcessDisplay = pendingCSVData.fileName;
+    }
+    
     document.getElementById('statFailedCampaign').textContent = csvToProcessDisplay;
     
     // Update UI - Mail Provider Set
@@ -2051,12 +2937,12 @@ function handleFile(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
         const csv = e.target.result;
-        parseCSV(csv, file.name);
+        parseCSV(csv, file.name, file);  // Pass the file object
     };
     reader.readAsText(file);
 }
 
-function parseCSV(csv, fileName) {
+function parseCSV(csv, fileName, file) {
     const lines = csv.trim().split('\n');
     const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
     
@@ -2084,7 +2970,8 @@ function parseCSV(csv, fileName) {
     pendingCSVData = {
         fileName: fileName,
         recipients: recipients,
-        lines: lines
+        lines: lines,
+        file: file  // Store the actual File object for backend submission
     };
 
     // Store in localStorage temporarily for preview
@@ -2308,7 +3195,13 @@ async function confirmUpload() {
         // ============ BACKEND SUCCESSFUL - NOW ADD TO LOCAL QUEUE ============
         // This keeps a local cache for the UI to work offline
         // IMPORTANT: Use the uploadId from backend, not a timestamp!
-        if (addToCSVQueue(pendingCSVData.fileName, pendingCSVData.recipients, backendResponse.uploadId)) {
+        const queueAddSuccess = await addToCSVQueue(
+            pendingCSVData.fileName,
+            pendingCSVData.recipients,
+            backendResponse.uploadId
+        );
+
+        if (queueAddSuccess) {
             showNotification('✅ CSV uploaded and added to queue successfully', 'success');
             
             // Clear pending data
@@ -2324,6 +3217,9 @@ async function confirmUpload() {
             // Update displays
             updateCSVQueueDisplay();
             updateDashboardStats();
+        } else {
+            // Keep preview data so user can retry queueing without re-uploading the file.
+            showNotification('❌ CSV uploaded but could not be added to queue. Please retry.', 'error');
         }
     } catch (error) {
         console.error('[DEBUG] Upload error:', error);
@@ -2394,8 +3290,15 @@ function setupNotifications() {
 function showNotification(message, type = 'info', duration = 3000) {
     const notif = document.getElementById('notification');
     notif.textContent = message;
-    notif.className = `notification show type-${type}`;
     
+    // Use classList to avoid flickering - remove old type class and add new one
+    notif.classList.remove('type-success', 'type-error', 'type-warning', 'type-info');
+    notif.classList.add(`type-${type}`);
+    
+    // Show the notification
+    notif.classList.add('show');
+    
+    // Hide after duration
     setTimeout(() => {
         notif.classList.remove('show');
     }, duration);
@@ -3019,8 +3922,117 @@ function handleCancelVerification() {
 
 function loadEmailProviders() {
     const providersContainer = document.getElementById('providersContainer');
-    const providers = JSON.parse(localStorage.getItem('emailProviders') || '[]');
-    const selectedEmailProviderId = localStorage.getItem('selectedEmailProvider');
+    
+    // Fetch email providers from backend (instead of localStorage)
+    fetchEmailProvidersFromBackend(async function(providers) {
+        // Also fetch the default email provider from backend
+        let selectedEmailProviderId = localStorage.getItem('selectedEmailProvider');
+        
+        try {
+            const token = getJwtToken();
+            if (!token) {
+                throw new Error('Not authenticated');
+            }
+            
+            console.log('[DEBUG] Fetching default email provider from backend...');
+            
+            const response = await fetch(`${API_BASE_URL}/email-providers/default`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.defaultProvider && data.defaultProvider.id) {
+                    selectedEmailProviderId = String(data.defaultProvider.id);
+                    // Update localStorage with the default from backend
+                    localStorage.setItem('selectedEmailProvider', selectedEmailProviderId);
+                    console.log('[DEBUG] Default email provider from backend:', selectedEmailProviderId);
+                }
+            } else {
+                console.log('[DEBUG] No default email provider set on backend');
+            }
+        } catch (error) {
+            console.warn('[DEBUG] Could not fetch default from backend, using localStorage:', error.message);
+        }
+        
+        displayEmailProviders(providers, selectedEmailProviderId);
+        updateMailProviderStat();
+    });
+}
+
+/**
+ * Fetch email providers from backend database
+ */
+async function fetchEmailProvidersFromBackend(callback) {
+    try {
+        const token = getJwtToken();
+        const userId = getCurrentUserId();
+        
+        console.log('[DEBUG] Fetching providers - Token:', token ? 'Present' : 'Missing', 'UserId:', userId);
+        
+        // Use the AUTHENTICATED endpoint that extracts userId from JWT token
+        const response = await fetch(`${API_BASE_URL}/email-providers`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        console.log('[DEBUG] Providers fetch response status:', response.status);
+        
+        if (!response.ok) {
+            console.error('[ERROR] Failed to fetch email providers - Status:', response.status);
+            throw new Error(`API returned ${response.status}`);
+        }
+        
+        let data = await response.json();
+        console.log('[DEBUG] Raw response from backend:', data);
+        
+        // Handle the response structure - providers are in an array under "providers" key OR at root level
+        let providers = Array.isArray(data) ? data : (data.providers || []);
+        
+        console.log('[DEBUG] Extracted providers:', providers);
+        
+        // Transform backend data to frontend format
+        if (providers && Array.isArray(providers)) {
+            providers = providers.map(p => ({
+                id: p.id,
+                name: p.displayName || p.fromEmail,
+                email: p.fromEmail,
+                type: p.providerType.toLowerCase(),
+                isVerified: p.isVerified,
+                isActive: p.isActive,
+                createdAt: p.createdAt
+            }));
+        } else {
+            providers = [];
+        }
+        
+        // Also update localStorage as cache (but fetch from DB is primary source)
+        localStorage.setItem('emailProviders', JSON.stringify(providers));
+        
+        console.log('[DEBUG] Email providers fetched from backend:', providers);
+        console.log('[DEBUG] Calling callback with', providers.length, 'providers');
+        callback(providers);
+        
+    } catch (error) {
+        console.error('[ERROR] Error fetching email providers from backend:', error);
+        console.log('[DEBUG] Checking localStorage for cached providers...');
+        
+        // Fallback to localStorage cache if backend fails
+        const cachedProviders = JSON.parse(localStorage.getItem('emailProviders') || '[]');
+        console.log('[DEBUG] Found', cachedProviders.length, 'cached providers in localStorage');
+        callback(cachedProviders);
+    }
+}
+
+function displayEmailProviders(providers, selectedEmailProviderId) {
+    const providersContainer = document.getElementById('providersContainer');
     
     // Check if campaign is actually active - validate the CSV exists and is in progress
     let campaignActive = false;
@@ -3053,6 +4065,13 @@ function loadEmailProviders() {
     if (providers.length === 0) {
         providersContainer.innerHTML = '<p class="empty-state">No email providers added yet</p>';
         return;
+    }
+    
+    // Auto-select first provider if only one exists and none is selected
+    if (providers.length === 1 && !selectedEmailProviderId) {
+        selectedEmailProviderId = String(providers[0].id);
+        localStorage.setItem('selectedEmailProvider', selectedEmailProviderId);
+        console.log('[EMAIL PROVIDER] Auto-selected single provider:', providers[0].name);
     }
     
     providersContainer.innerHTML = providers.map(provider => {
@@ -3249,7 +4268,7 @@ function deleteEmailProvider(providerId) {
     showDeleteConfirmationModal(providerId, providerName);
 }
 
-function setDefaultProvider(e) {
+async function setDefaultProvider(e) {
     // Check if campaign is currently active
     const campaignActive = !!localStorage.getItem('currentProcessingCSVId');
     
@@ -3265,19 +4284,52 @@ function setDefaultProvider(e) {
     const selectedProvider = providers.find(p => String(p.id) === String(selectedProviderId));
     
     if (selectedProvider) {
-        // Store the selected provider ID in localStorage
-        localStorage.setItem('selectedEmailProvider', selectedProviderId);
-        
-        // Show toast notification
-        showNotification(`✅ ${selectedProvider.name} is now set as default email provider!`, 'success');
-        
-        console.log('[EMAIL PROVIDER] Default provider set to:', selectedProvider.name, selectedProviderId);
-        
-        // Reload the provider list to update UI with star indicator
-        loadEmailProviders();
-        
-        // Update dashboard stat in real-time
-        updateMailProviderStat();
+        try {
+            // Call backend API to set as default
+            const token = getJwtToken();
+            if (!token) {
+                showNotification('❌ Not logged in. Please login first.', 'error');
+                window.location.href = 'auth.html';
+                return;
+            }
+            
+            console.log('[EMAIL PROVIDER] Calling backend to set default provider:', selectedProviderId);
+            
+            const response = await fetch(`${API_BASE_URL}/email-providers/${selectedProviderId}/set-as-default`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Store the selected provider ID in localStorage as backup
+                localStorage.setItem('selectedEmailProvider', selectedProviderId);
+                
+                // Show success notification
+                showNotification(`✅ ${selectedProvider.name} is now set as default email provider!`, 'success');
+                
+                console.log('[EMAIL PROVIDER] Default provider set successfully:', selectedProvider.name, selectedProviderId);
+                
+                // Reload the provider list to update UI with star indicator
+                loadEmailProviders();
+                
+                // Update dashboard stat in real-time
+                updateMailProviderStat();
+            } else {
+                const error = await response.json();
+                showNotification(`❌ Failed to set default provider: ${error.error || 'Unknown error'}`, 'error');
+                console.error('[EMAIL PROVIDER] Failed to set default provider:', error);
+                e.target.checked = false;
+            }
+        } catch (error) {
+            showNotification(`❌ Error setting default provider: ${error.message}`, 'error');
+            console.error('[EMAIL PROVIDER] API call error:', error);
+            e.target.checked = false;
+        }
     }
 }
 
@@ -3289,25 +4341,111 @@ function setupSecurityForm() {
 }
 
 function setupEmailSelectionPreference() {
-    // Load saved preference from localStorage
-    const savedPreference = localStorage.getItem('emailSelectionPreference');
-    if (savedPreference) {
-        const radio = document.querySelector(`input[name="emailSelection"][value="${savedPreference}"]`);
-        if (radio) {
-            radio.checked = true;
-        }
-    }
+    // Load saved preference from backend first, fallback to localStorage
+    loadEmailSelectionPreferenceFromBackend();
 
     // Add event listeners to save preference when changed
     const emailSelectionRadios = document.querySelectorAll('input[name="emailSelection"]');
     emailSelectionRadios.forEach(radio => {
         radio.addEventListener('change', (e) => {
             if (e.target.checked) {
-                localStorage.setItem('emailSelectionPreference', e.target.value);
-                showNotification(`✅ Email preference set to: ${e.target.value === 'prompt' ? 'Ask me' : 'Default'}`, 'success');
+                saveEmailSelectionPreferenceToBackend(e.target.value);
             }
         });
     });
+}
+
+/**
+ * Load email selection preference from backend database
+ */
+async function loadEmailSelectionPreferenceFromBackend() {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            console.log('[EMAIL PREF] No token, using localStorage');
+            loadEmailSelectionPreferenceFromStorage();
+            return;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/users/email-selection-preference`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const preference = data.preference || 'default';
+            console.log('[EMAIL PREF] Loaded from backend:', preference);
+
+            // Update UI
+            const radio = document.querySelector(`input[name="emailSelection"][value="${preference}"]`);
+            if (radio) {
+                radio.checked = true;
+            }
+
+            // Cache in localStorage
+            localStorage.setItem('emailSelectionPreference', preference);
+        } else {
+            console.warn('[EMAIL PREF] Backend fetch failed, using localStorage');
+            loadEmailSelectionPreferenceFromStorage();
+        }
+    } catch (error) {
+        console.warn('[EMAIL PREF] Error loading from backend:', error);
+        loadEmailSelectionPreferenceFromStorage();
+    }
+}
+
+/**
+ * Load email selection preference from localStorage (fallback)
+ */
+function loadEmailSelectionPreferenceFromStorage() {
+    const savedPreference = localStorage.getItem('emailSelectionPreference') || 'default';
+    const radio = document.querySelector(`input[name="emailSelection"][value="${savedPreference}"]`);
+    if (radio) {
+        radio.checked = true;
+    }
+}
+
+/**
+ * Save email selection preference to backend database
+ */
+async function saveEmailSelectionPreferenceToBackend(preference) {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            console.log('[EMAIL PREF] No token, saving to localStorage only');
+            localStorage.setItem('emailSelectionPreference', preference);
+            showNotification(`✅ Email preference set to: ${preference === 'prompt' ? 'Ask me' : 'Default'}`, 'success');
+            return;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/users/email-selection-preference`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ preference })
+        });
+
+        if (response.ok) {
+            console.log('[EMAIL PREF] Saved to backend:', preference);
+            localStorage.setItem('emailSelectionPreference', preference);
+            showNotification(`✅ Email preference set to: ${preference === 'prompt' ? 'Ask me' : 'Default'}`, 'success');
+        } else {
+            const error = await response.json();
+            console.error('[EMAIL PREF] Backend save failed:', error);
+            localStorage.setItem('emailSelectionPreference', preference);
+            showNotification(`⚠️ Saved locally (backend sync failed): ${preference === 'prompt' ? 'Ask me' : 'Default'}`, 'warning');
+        }
+    } catch (error) {
+        console.error('[EMAIL PREF] Error saving to backend:', error);
+        localStorage.setItem('emailSelectionPreference', preference);
+        showNotification(`⚠️ Saved locally: ${preference === 'prompt' ? 'Ask me' : 'Default'}`, 'warning');
+    }
 }
 
 async function handlePasswordUpdate(e) {
@@ -3395,8 +4533,9 @@ async function handlePasswordUpdate(e) {
 
 function setupDeleteAccount() {
     const deleteBtn = document.getElementById('deleteAccountBtn');
-    if (deleteBtn) {
+    if (deleteBtn && deleteBtn.dataset.deleteAccountBound !== 'true') {
         deleteBtn.addEventListener('click', handleDeleteAccountClick);
+        deleteBtn.dataset.deleteAccountBound = 'true';
     }
 }
 
@@ -3470,7 +4609,7 @@ async function confirmDeleteAccount() {
         // Clear all data after a short delay
         setTimeout(() => {
             localStorage.clear();
-            window.location.href = 'index.html';
+            window.location.href = 'auth.html';
         }, 1500);
     } catch (error) {
         // Error
@@ -3570,6 +4709,7 @@ function restoreCampaignStateOnReload() {
         const pauseBtn = document.getElementById('pauseBtn');
         if (startBtn) startBtn.style.display = 'inline-flex';
         if (pauseBtn) pauseBtn.style.display = 'none';
+        syncCampaignControlUI();
         return;
     }
     
@@ -3591,6 +4731,7 @@ function restoreCampaignStateOnReload() {
         const pauseBtn = document.getElementById('pauseBtn');
         if (startBtn) startBtn.style.display = 'inline-flex';
         if (pauseBtn) pauseBtn.style.display = 'none';
+        syncCampaignControlUI();
         return;
     }
     
@@ -3635,9 +4776,12 @@ function restoreCampaignStateOnReload() {
             campaignStatus.textContent = 'Campaign running...';
             campaignStatus.className = 'campaign-status running';
         }
+        startCampaignTimer(true);
+        startCampaignStatusPolling();
     }
     
     console.log('[DEBUG] Campaign state restored - isPaused:', isPaused, 'pausedRow:', pausedRow);
+    syncCampaignControlUI(queue);
 }
 
 /**
@@ -3645,21 +4789,30 @@ function restoreCampaignStateOnReload() {
  * Restores all campaign logs that were saved to localStorage
  */
 function restoreTerminalLogs() {
+    const logsList = document.getElementById('logsList');
+    const terminalContent = logsList?.querySelector('.terminal-content');
+    if (!terminalContent) {
+        return;
+    }
+
+    terminalContent.innerHTML = '<p class="terminal-line terminal-info">Loading persisted logs...</p>';
+
+    loadPersistedCampaignLogs(500).then((persistedCount) => {
+        if (persistedCount > 0) {
+            if (logsList) logsList.scrollTop = logsList.scrollHeight;
+            return;
+        }
+
     const sessionLogs = JSON.parse(localStorage.getItem('currentSessionLogs') || '{}');
     
     // If no logs exist, nothing to restore
     if (!sessionLogs.logs || sessionLogs.logs.length === 0) {
         console.log('[DEBUG] No logs to restore from localStorage');
+            terminalContent.innerHTML = '<p class="terminal-line terminal-info">System ready...</p>';
         return;
     }
-    
-    const logsList = document.getElementById('logsList');
-    const terminalContent = logsList?.querySelector('.terminal-content');
-    
-    if (!terminalContent) {
-        console.log('[DEBUG] Terminal content element not found, cannot restore logs');
-        return;
-    }
+
+        terminalContent.innerHTML = '';
     
     console.log('[DEBUG] Restoring', sessionLogs.logs.length, 'terminal logs from localStorage');
     
@@ -3677,6 +4830,122 @@ function restoreTerminalLogs() {
     }
     
     console.log('[DEBUG] Terminal logs restored successfully');
+    });
+}
+
+async function exportTerminalLogs() {
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            showNotification('❌ Please login again to export logs', 'error');
+            return;
+        }
+
+        const queueId = localStorage.getItem('currentQueueId');
+        const params = new URLSearchParams();
+        params.set('limit', '10000');
+        if (queueId) {
+            params.set('queueId', String(queueId));
+        }
+
+        const response = await fetch(`${API_BASE_URL}/campaign-queue/events/export?${params.toString()}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                ...buildUserIdHeader()
+            }
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to export logs');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = queueId ? `campaign-logs-queue-${queueId}.txt` : 'campaign-logs-all.txt';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+
+        showNotification('✅ Logs exported successfully', 'success');
+    } catch (error) {
+        showNotification(`❌ ${error.message}`, 'error');
+    }
+}
+
+async function handleClearDashboardStats() {
+    const queue = getCSVQueue();
+    const isRunning = queue.some(item => normalizeCsvStatus(item?.status) === 'processing');
+    if (isRunning) {
+        showNotification('⚠️ Cannot clear stats while a campaign is running. Pause or complete it first.', 'warning');
+        return;
+    }
+
+    showConfirmModal(
+        '⚠️ Clear Dashboard Stats?',
+        'This will permanently delete all persisted <strong>Today</strong> and <strong>Till Date</strong> stats from database tables for your account. This cannot be undone.',
+        async () => {
+            const clearStatsBtn = document.getElementById('clearStatsBtn');
+            const originalLabel = clearStatsBtn?.innerHTML;
+            if (clearStatsBtn) {
+                clearStatsBtn.disabled = true;
+                clearStatsBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            }
+
+            try {
+                const token = getJwtToken();
+                if (!token) {
+                    showNotification('❌ Not logged in. Please login again.', 'error');
+                    window.location.href = 'auth.html';
+                    return;
+                }
+
+                const response = await fetch(`${API_BASE_URL}/campaign-queue/dashboard-stats`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                        ...buildUserIdHeader()
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Failed to clear stats (${response.status})`);
+                }
+
+                dashboardDbStatsCache = {
+                    daily: { sent: 0, failed: 0, total: 0 },
+                    ytd: { sent: 0, failed: 0, total: 0 },
+                    running: null
+                };
+
+                localStorage.removeItem('lifetimeStats');
+                localStorage.removeItem('campaignSentProgress');
+                localStorage.removeItem('csvProgress');
+                localStorage.removeItem('campaignTargetTotal');
+
+                await refreshDashboardStatsFromBackend();
+                updateDashboardStats(getCSVQueue());
+
+                showNotification('✅ Dashboard stats cleared successfully', 'success');
+            } catch (error) {
+                showNotification(`❌ ${error.message}`, 'error');
+            } finally {
+                if (clearStatsBtn) {
+                    clearStatsBtn.disabled = false;
+                    clearStatsBtn.innerHTML = originalLabel || '<i class="fas fa-trash-can"></i>';
+                }
+            }
+        },
+        null,
+        'Clear Stats',
+        'Cancel'
+    );
 }
 
 function startCSVLogging(csvName) {
@@ -3750,31 +5019,105 @@ function showEmailSelectionModal() {
     document.getElementById('emailSelectionModal').style.display = 'block';
 }
 
-function confirmEmailSelection() {
-    const selected = document.querySelector('input[name="campaignEmail"]:checked');
-    
-    if (!selected) {
-        showNotification('Please select an email provider', 'error');
-        return;
-    }
-    
-    console.log('[EMAIL SELECTION] User confirmed email:', selected.value);
-    
-    // Store selected email provider
-    localStorage.setItem('selectedEmailProvider', selected.value);
-    
-    // Close modal
-    document.getElementById('emailSelectionOverlay').style.display = 'none';
-    document.getElementById('emailSelectionModal').style.display = 'none';
-    
-    // Continue with campaign start
-    console.log('[DEBUG] Calling proceedWithCampaignStart() from confirmEmailSelection()');
-    proceedWithCampaignStart();
-}
+/**
+ * Send campaign CSV file to backend for processing and queuing
+ * @param {File} csvFile - The CSV file to send
+ * @param {string} campaignName - Name of the campaign
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body content
+ * @param {Long} providerId - Email provider ID
+ */
+async function sendCampaignToBackend(csvFile, campaignName, subject, body, providerId) {
+    try {
+        if (!csvFile) {
+            showNotification('❌ No CSV file available. Please upload a CSV first.', 'error');
+            return null;
+        }
 
-function cancelEmailSelection() {
-    document.getElementById('emailSelectionOverlay').style.display = 'none';
-    document.getElementById('emailSelectionModal').style.display = 'none';
+        console.log('[DEBUG] Sending campaign to backend:', {
+            campaignName,
+            subject,
+            providerId,
+            fileName: csvFile.name
+        });
+
+        const token = getJwtToken();
+        const userId = getCurrentUserId();
+
+        const formData = new FormData();
+        formData.append('csvFile', csvFile);
+        formData.append('campaignName', campaignName || csvFile.name.replace('.csv', ''));
+        formData.append('subject', subject);
+        formData.append('body', body);
+        formData.append('providerId', providerId);
+
+        // Show loading state
+        const startBtn = document.getElementById('startBtn');
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading to Backend...';
+        }
+
+        const response = await fetch(`${API_BASE_URL}/campaigns/upload-csv`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                ...(userId ? { 'X-User-Id': userId } : {})
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Backend request failed (${response.status})`);
+        }
+
+        const backendResponse = await response.json();
+        console.log('[DEBUG] Backend response:', backendResponse);
+
+        // Add to local queue for display
+        if (backendResponse.success && backendResponse.queueId) {
+            const queueItem = {
+                id: backendResponse.queueId,
+                name: campaignName || csvFile.name,
+                recipients: JSON.parse(localStorage.getItem('recipients') || '[]'),
+                recipientCount: backendResponse.totalRecipients,
+                status: 'pending',
+                uploadedAt: new Date().toLocaleString(),
+                completedAt: null,
+                databaseId: backendResponse.csvUploadId,
+                campaignId: backendResponse.campaignId,
+                backendQueue: true  // Mark as from backend
+            };
+
+            // Add to CSV queue
+            const queue = getCSVQueue();
+            queue.push(queueItem);
+            saveCSVQueue(queue);
+
+            showNotification(`✅ Campaign queued successfully! Queue position: ${backendResponse.queuePosition}`, 'success');
+            
+            // Log activity
+            activityLog.add(`Campaign created: ${campaignName} (${backendResponse.totalRecipients} recipients) - Queue position: ${backendResponse.queuePosition}`, 'campaign-start', 'play-circle');
+
+            return backendResponse;
+        } else {
+            throw new Error('Invalid response from backend');
+        }
+
+    } catch (error) {
+        console.error('[ERROR] Failed to send campaign to backend:', error);
+        showNotification(`❌ Failed to send campaign: ${error.message}`, 'error');
+        
+        // Restore button state
+        const startBtn = document.getElementById('startBtn');
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<i class="fas fa-play"></i> Start Campaign';
+        }
+        
+        return null;
+    }
 }
 
 function proceedWithCampaignStart() {
@@ -3791,206 +5134,373 @@ function proceedWithCampaignStart() {
         return;
     }
     
-    // This continues the campaign start process after email selection (if needed)
-    const recipients = JSON.parse(localStorage.getItem('recipients') || '[]');
+    // Get campaign details from UI
     const subject = document.getElementById('emailSubject')?.value?.trim();
-    const body = document.getElementById('emailBody')?.value?.trim();
-    const sendTo = document.getElementById('sendToOption')?.value || 'all';
-    const selectedEmailProviderId = localStorage.getItem('selectedEmailProvider');
+    const body = document.getElementById('emailBody')?.value || '';
+    let selectedEmailProviderId = localStorage.getItem('selectedEmailProvider');
     
     console.log('[DEBUG] Subject:', subject ? 'Present' : 'MISSING');
     console.log('[DEBUG] Body:', body ? 'Present' : 'MISSING');
-    console.log('[DEBUG] Recipients count:', recipients.length);
     console.log('[DEBUG] Selected Email Provider ID:', selectedEmailProviderId);
     
-    // Validate range if needed
-    if (sendTo === 'range') {
-        const rangeFrom = parseInt(document.getElementById('rangeFrom')?.value || 0);
-        const rangeTo = parseInt(document.getElementById('rangeTo')?.value || 0);
+    // Check email selection preference - prompt if needed
+    const emailSelectionPref = localStorage.getItem('emailSelectionPreference') || 'default';
+    if (emailSelectionPref === 'prompt') {
+        // Get list of available providers
+        const providers = JSON.parse(localStorage.getItem('emailProviders') || '[]');
         
-        if (rangeFrom < 1 || rangeTo < rangeFrom || rangeTo > recipients.length) {
-            showNotification('Invalid range selected', 'error');
+        if (providers.length === 0) {
+            showNotification('❌ No email providers available. Please add and configure an email provider first.', 'error');
             return;
+        }
+        
+        if (providers.length === 1) {
+            // Only one provider - auto-select it
+            selectedEmailProviderId = String(providers[0].id);
+            localStorage.setItem('selectedEmailProvider', selectedEmailProviderId);
+        } else if (providers.length > 1) {
+            // Multiple providers - show modal for selection
+            showEmailProviderSelectionModal(() => {
+                // Callback: after user selects provider, resume campaign start
+                const newSelectedId = localStorage.getItem('selectedEmailProvider');
+                if (newSelectedId) {
+                    selectedEmailProviderId = newSelectedId;
+                    // Re-call proceedWithCampaignStart to continue with selected provider
+                    // But first, remove the preference check to avoid infinite loop
+                    continueCampaignStart(subject, body, selectedEmailProviderId);
+                }
+            });
+            return; // Exit here, modal will handle the flow
         }
     }
     
-    // Check if resuming from paused campaign
-    const isPaused = localStorage.getItem('campaignPaused') === 'true';
-    const pausedProviderLock = localStorage.getItem('campaignEmailProvider');
-    const wasResuming = isPaused;  // Save resume state for later use
-    const pausedRow = parseInt(localStorage.getItem('campaignPausedRow') || '0');
-    let startingRow = 0;
+    // Continue with normal campaign start
+    continueCampaignStart(subject, body, selectedEmailProviderId);
+}
+
+/**
+ * Continue campaign start after email provider is confirmed
+ */
+function continueCampaignStart(subject, body, selectedEmailProviderId) {
+    // Check for CSV - either in pendingCSVData OR in the queue
+    let csvToUse = null;
     
-    if (isPaused && pausedProviderLock && pausedProviderLock !== 'undefined') {
-        // Validate provider matches
-        if (pausedProviderLock !== selectedEmailProviderId) {
-            showConfirmModal(
-                '⚠️ Provider Mismatch',
-                `Campaign was paused with ${pausedProviderLock}, but you're trying to resume with ${selectedEmailProviderId}. 
-                
-Do you want to:
-- Resume: Continue from row ${localStorage.getItem('campaignPausedRow')} with the current provider (might cause issues)
-- Reset: Start fresh with the current provider`,
-                () => {
-                    // Resume anyway (user's responsibility)
-                    proceedWithCampaignResume();
-                },
-                () => {
-                    // Reset and start fresh
-                    localStorage.removeItem('campaignPaused');
-                    localStorage.removeItem('campaignPausedRow');
-                    localStorage.removeItem('campaignEmailProvider');
-                    const providerSelect = document.getElementById('providerType');
-                    if (providerSelect) providerSelect.disabled = false;
-                    proceedWithCampaignStart(); // Restart the process
-                },
-                'Resume Anyway',
-                'Start Fresh'
-            );
-            return;
+    // Priority 1: Check if there's a pending/processing CSV in the queue (from backend upload)
+    let queue = getCSVQueue();
+    console.log('[DEBUG] Queue at campaign start:', JSON.stringify(queue));
+    
+    // Look for any CSV in queue (pending, processing, or completed for reprocessing)
+    let queuedCSV = queue.find(q => {
+        const status = normalizeCsvStatus(q?.status);
+        console.log('[DEBUG] Checking CSV id=', q?.id, 'rawStatus=', q?.status, '-> normalized:', status);
+        return status === 'pending' || status === 'processing';
+    });
+    
+    if (queuedCSV) {
+        console.log('[DEBUG] Found CSV in queue:', queuedCSV);
+        csvToUse = queuedCSV;
+        // Store recipients from queue for the campaign
+        // For completed CSVs (reprocessing), use totalRows or recipientCount
+        const recipients = queuedCSV.recipients || [];
+        const recipientCount = queuedCSV.recipientCount || queuedCSV.totalRows || recipients.length;
+        console.log('[DEBUG] CSV recipientCount:', recipientCount, 'recipients array length:', recipients.length);
+        
+        // If no recipients array but have count, create array of dummy recipients
+        if (recipients.length === 0 && recipientCount > 0) {
+            console.log('[DEBUG] Creating dummy recipient array from count');
+            // This is a reprocessed CSV - we don't need individual recipients for display
+            // The backend will handle fetching them
         }
-        // Provider matches, proceed with resume
-        startingRow = parseInt(localStorage.getItem('campaignPausedRow') || '0');
-        console.log('[DEBUG] Resuming paused campaign from row:', startingRow);
+        localStorage.setItem('recipients', JSON.stringify(recipients));
+    } 
+    // Priority 2: Check pending CSV data (currently being previewed)
+    else if (pendingCSVData.file && pendingCSVData.recipients.length > 0) {
+        console.log('[DEBUG] Found pending CSV data for upload');
+        csvToUse = {
+            name: pendingCSVData.fileName,
+            recipients: pendingCSVData.recipients,
+            file: pendingCSVData.file,
+            isPending: true  // Mark as needing upload
+        };
+        localStorage.setItem('recipients', JSON.stringify(pendingCSVData.recipients));
     }
     
-    // Find first PENDING CSV to process (not completed)
-    // Also accept 'processing' CSVs for retry scenarios
-    const queue = getCSVQueue();
-    const processingItem = queue.find(q => q.status === 'pending' || q.status === 'processing');
+    if (!csvToUse) {
+        console.error('[DEBUG] No CSV found. Queue length:', queue.length, 'PendingCSVData:', pendingCSVData);
+        showNotification('❌ No CSV file available. Please upload a CSV file first or select one from the queue.', 'error');
+        return;
+    }
     
-    if (processingItem) {
-        // Check if user is trying to start a DIFFERENT CSV than the paused one
-        const pausedCSVId = parseInt(currentProcessingId);
-        if (isPaused && processingItem.id !== pausedCSVId) {
-            // User wants to start a new campaign, not resume the paused one
-            console.log('[DEBUG] User starting NEW campaign with different CSV - clearing paused state');
-            localStorage.removeItem('campaignPaused');
-            localStorage.removeItem('campaignPausedRow');
-            localStorage.removeItem('campaignEmailProvider');
-            localStorage.removeItem('currentProcessingCSVId');
-            startingRow = 0;
-            const providerSelect = document.getElementById('providerType');
-            if (providerSelect) providerSelect.disabled = false;
-        }
+    // Verify we have recipients data (either from queue or pending upload)
+    const hasRecipients = (csvToUse.recipients && csvToUse.recipients.length > 0) || 
+                          (csvToUse.recipientCount && csvToUse.recipientCount > 0) ||
+                          (pendingCSVData?.recipients && pendingCSVData.recipients.length > 0);
+    
+    if (!hasRecipients) {
+        console.error('[DEBUG] No recipients data found for CSV:', csvToUse);
+        showNotification('❌ No recipients found. Please upload a CSV with recipients.', 'error');
+        return;
+    }
+    
+    // If CSV is still pending (not uploaded to backend yet), send it first
+    if (csvToUse.isPending && csvToUse.file) {
+        console.log('[DEBUG] CSV pending upload - sending to backend first');
+        // Get campaign name from upload form or generate one
+        const campaignName = document.getElementById('campaignNameInput')?.value?.trim() || 
+                              csvToUse.name.replace('.csv', '') || 
+                              'Campaign ' + new Date().toLocaleString();
         
-        setCSVProcessing(processingItem.id);
-        localStorage.setItem('currentProcessingCSVId', processingItem.id);
-        localStorage.setItem('csvProgress', startingRow.toString());
-        
-        // Only clear pause state if starting fresh (not resuming)
-        if (!isPaused) {
-            localStorage.removeItem('csvStoppedAt'); // Clear any previous stopped time
-        }
-        
-        console.log('[DEBUG] CSV marked as processing:', processingItem.id);
-        
-        // Log campaign start
-        startCSVLogging(processingItem.name);
-        
-        // Update UI
-        updateCurrentRunningCSV();
-        updateCSVQueueDisplay();
-        
-        // Log activity
-        activityLog.add(`Campaign started: ${processingItem.name} (${processingItem.recipientCount} recipients)`, 'campaign-start', 'play-circle');
-        
-        // Show campaign running state - with better element handling
+        // Show loading state on button
         const startBtn = document.getElementById('startBtn');
-        const pauseBtn = document.getElementById('pauseBtn');
-        const campaignStatus = document.getElementById('campaignStatus');
+        const originalText = startBtn?.innerHTML;
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting Campaign...';
+        }
         
-        console.log('[DEBUG] Elements found - startBtn:', !!startBtn, 'pauseBtn:', !!pauseBtn, 'campaignStatus:', !!campaignStatus);
-        
-        if (startBtn) startBtn.style.display = 'none';
-        if (pauseBtn) pauseBtn.style.display = 'inline-flex';
-        if (campaignStatus) {
-            // Show if resuming from paused state or starting fresh
-            if (wasResuming) {
-                campaignStatus.textContent = `Resuming from row ${pausedRow}...`;
-            } else {
-                campaignStatus.textContent = 'Campaign running...';
+        // Send to backend
+        (async () => {
+            try {
+                const backendResponse = await sendCampaignToBackend(
+                    csvToUse.file,
+                    campaignName,
+                    subject,
+                    body,
+                    selectedEmailProviderId
+                );
+                
+                if (backendResponse && backendResponse.success) {
+                    const token = getJwtToken();
+                    const rangePayload = getSendRangePayload();
+                    const startResponse = await fetch(`${API_BASE_URL}/campaign-queue/start/${backendResponse.queueId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(rangePayload)
+                    });
+
+                    if (!startResponse.ok) {
+                        const startError = await startResponse.json().catch(() => ({}));
+                        throw new Error(startError.error || 'Campaign queued but failed to start');
+                    }
+
+                    const started = await startResponse.json().catch(() => ({}));
+
+                    // Success - campaign started
+                    localStorage.setItem('currentQueueId', String(backendResponse.queueId));
+                    localStorage.setItem('currentProcessingCSVId', String(csvToUse.id || backendResponse.csvUploadId || backendResponse.queueId));
+                    localStorage.setItem('currentCampaignId', String(backendResponse.campaignId));
+                    localStorage.setItem('csvProgress', '0');
+                    localStorage.setItem('campaignSentProgress', '0');
+                    localStorage.setItem(getCampaignLogSeqKey(backendResponse.queueId), '0');
+
+                    const targetTotal = Number(started.totalRecipients ?? backendResponse.totalRecipients ?? 0);
+                    if (targetTotal > 0) {
+                        localStorage.setItem('campaignTargetTotal', String(targetTotal));
+                    }
+
+                    setCampaignRunningUI(false);
+                    startCSVLogging(csvToUse.name || campaignName || 'campaign.csv');
+                    updateCurrentRunningCSV();
+                    updateCSVQueueDisplay();
+                    showNotification('✅ Campaign started successfully!', 'success');
+                } else {
+                    showNotification('❌ Failed to start campaign', 'error');
+                    if (startBtn) {
+                        startBtn.disabled = false;
+                        startBtn.innerHTML = originalText;
+                    }
+                }
+            } catch (error) {
+                showNotification('❌ Error starting campaign: ' + error.message, 'error');
+                if (startBtn) {
+                    startBtn.disabled = false;
+                    startBtn.innerHTML = originalText;
+                }
             }
-            campaignStatus.className = 'campaign-status running';
+        })();
+        return;
+    }
+    
+    // If CSV is already in queue (from backend), just mark it as processing
+    if (csvToUse && !csvToUse.isPending) {
+        console.log('[DEBUG] Starting campaign with queued CSV:', csvToUse);
+        
+        // Show loading state
+        const startBtn = document.getElementById('startBtn');
+        const originalText = startBtn?.innerHTML;
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting Campaign...';
         }
         
-        // Update button icons for running state
-        updateCampaignButtonIcons('running');
-        
-        console.log('[DEBUG] Button display updated - pauseBtn visibility should now be inline-flex');
-        showNotification('Campaign started successfully!', 'success');
-        
-        // Send actual email campaign to backend
-        sendCampaignToBackend({
-            subject: subject,
-            body: body,
-            recipientFilter: sendTo,
-            recipients: recipients,
-            emailProviderId: selectedEmailProviderId
-        });
-        
-        // NOTE: Progress stays at 0 since there's no real backend actually sending emails
-        // In a real scenario with actual email sending, this would increment based on send progress
-        
-        // Clear any existing timeout
-        if (campaignTimeoutId) {
-            clearTimeout(campaignTimeoutId);
-            campaignTimeoutId = null;
-        }
-        
-        // SAFETY CHECK: Ensure campaign is not paused before setting new timeout
-        // This prevents infinite loop if pause flag wasn't properly cleared during resume
-        // Note: wasResuming and pausedRow were already captured at function start
-        
-        localStorage.removeItem('campaignPaused');
-        localStorage.removeItem('campaignPausedRow');
-        
-        // Start the timer display - pass whether this was a resume to preserve elapsed time
-        startCampaignTimer(wasResuming);
-        
-        // Calculate timeout duration:
-        // - If resuming: use remaining time (don't add another 10 seconds)
-        // - If starting fresh: use full 10 seconds
-        const CAMPAIGN_TOTAL_TIME = 10000; // 10 seconds total
-        let timeoutDuration = CAMPAIGN_TOTAL_TIME;
-        
-        if (wasResuming) {
-            // If resuming, calculate remaining time
-            timeoutDuration = Math.max(100, CAMPAIGN_TOTAL_TIME - campaignElapsedTime);
-            console.log('[DEBUG] Resuming campaign - elapsed:', campaignElapsedTime, 'remaining:', timeoutDuration);
-        } else {
-            console.log('[DEBUG] Starting fresh campaign - timeout:', timeoutDuration);
-        }
-        
-        // Set new timeout and store the ID
-        campaignTimeoutId = setTimeout(() => {
-            // Check if campaign was paused during execution (user manually paused)
-            // Note: We cleared the pause flag above, so this is only true if paused AFTER starting
-            const isPaused = localStorage.getItem('campaignPaused') === 'true';
-            if (!isPaused) {
-                // Store the stopped time when campaign completes
-                const stoppedTime = new Date().toLocaleString();
-                localStorage.setItem('csvStoppedAt', stoppedTime);
-                
-                // Call completion handler
-                onCampaignComplete();
-                
-                // Update UI to show stopped time
+        (async () => {
+            try {
+                const token = getJwtToken();
+                const campaignName = document.getElementById('campaignNameInput')?.value?.trim()
+                    || csvToUse.name?.replace('.csv', '')
+                    || `Campaign ${new Date().toLocaleString()}`;
+
+                const response = await fetch(`${API_BASE_URL}/campaign-queue/start-from-csv-upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        csvUploadId: csvToUse.id,
+                        campaignName,
+                        subject,
+                        body,
+                        providerId: Number(selectedEmailProviderId),
+                        ...getSendRangePayload()
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || 'Failed to start campaign from existing CSV');
+                }
+
+                const started = await response.json();
+
+                setCSVProcessing(csvToUse.id);
+                localStorage.setItem('currentQueueId', String(started.queueId));
+                localStorage.setItem('currentCampaignId', String(started.campaignId));
+                localStorage.setItem('currentProcessingCSVId', String(csvToUse.id));
+                localStorage.setItem('campaignSentProgress', '0');
+                localStorage.setItem(getCampaignLogSeqKey(started.queueId), '0');
+
+                const targetTotal = Number(started.totalRecipients ?? started.totalRows ?? csvToUse.recipientCount ?? 0);
+                if (targetTotal > 0) {
+                    localStorage.setItem('campaignTargetTotal', String(targetTotal));
+                }
+
+                const isPaused = localStorage.getItem('campaignPaused') === 'true';
+                const pausedRow = parseInt(localStorage.getItem('campaignPausedRow') || '0');
+                localStorage.setItem('csvProgress', String(isPaused ? pausedRow : 0));
+
+                localStorage.removeItem('campaignPaused');
+                localStorage.removeItem('campaignPausedAt');
+
+                setCampaignRunningUI(isPaused);
+                startCSVLogging(csvToUse.name || campaignName || 'campaign.csv');
                 updateCurrentRunningCSV();
+                updateCSVQueueDisplay();
+                activityLog.add(`Campaign started: ${queuedCSV.name}`, 'campaign-start', 'play-circle');
+                showNotification('✅ Campaign started successfully!', 'success');
+            } catch (error) {
+                showNotification(`❌ Failed to start campaign: ${error.message}`, 'error');
+            } finally {
+                if (startBtn) {
+                    startBtn.disabled = false;
+                    startBtn.innerHTML = originalText;
+                }
             }
-            campaignTimeoutId = null;
-        }, timeoutDuration);
-    } else {
-        console.log('[DEBUG] ERROR: No pending CSV found in queue!');
-        showNotification('No CSV available to process. Please upload a CSV first.', 'error');
+        })();
+
+        return;
     }
 }
+
+/**
+ * DEBUG HELPER: Add a test email provider for demo/testing purposes
+ * Call this from browser console: window.addTestProvider()
+ * This bypasses verification for quick testing
+ */
+window.addTestProvider = async function(name = 'Test Gmail', email = 'test@gmail.com', type = 'SMTP') {
+    try {
+        console.log('[DEBUG] Adding test provider:', name, email, type);
+        
+        const token = getJwtToken();
+        if (!token) {
+            console.error('[ERROR] No JWT token found. Please login first.');
+            return;
+        }
+        
+        // Directly add provider without verification (for testing only)
+        const response = await fetch(`${API_BASE_URL}/email-providers`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                providerType: type,
+                displayName: name,
+                fromEmail: email,
+                fromName: name,
+                encryptedConfig: {
+                    password: 'test-app-password-123',
+                    username: email,
+                    host: 'smtp.gmail.com',
+                    port: 587
+                }
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            console.error('[ERROR] Failed to add test provider:', error);
+            showNotification('❌ Failed to add test provider: ' + error.error, 'error');
+            return;
+        }
+        
+        const result = await response.json();
+        console.log('[SUCCESS] Test provider added:', result);
+        showNotification(`✅ Test provider "${name}" added successfully!`, 'success');
+        
+        // Reload providers to show in UI
+        loadEmailProviders();
+        
+    } catch (error) {
+        console.error('[ERROR] Error adding test provider:', error);
+        showNotification('❌ Error: ' + error.message, 'error');
+    }
+};
+
+console.log('✅ App loaded. Debug helper available: window.addTestProvider()');
 
 /**
  * Handle resuming a campaign from paused state
  */
 function proceedWithCampaignResume() {
     console.log('[DEBUG] proceedWithCampaignResume() called');
+
+    const queueId = localStorage.getItem('currentQueueId');
+    if (queueId) {
+        (async () => {
+            try {
+                const token = getJwtToken();
+                const response = await fetch(`${API_BASE_URL}/campaign-queue/${queueId}/resume`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(getSendRangePayload())
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || 'Failed to resume campaign');
+                }
+
+                localStorage.removeItem('campaignPaused');
+                localStorage.removeItem('campaignPausedAt');
+                setCampaignRunningUI(true);
+                addTerminalLog('Campaign resumed from paused state', 'status');
+                updateCurrentRunningCSV();
+                updateCSVQueueDisplay();
+                showNotification('Campaign resumed', 'success');
+            } catch (error) {
+                showNotification(`❌ Resume failed: ${error.message}`, 'error');
+            }
+        })();
+        return;
+    }
     
     // NOTE: Do NOT clear pause state here - proceedWithCampaignStart() will handle it
     // If we clear the flag now, proceedWithCampaignStart() will think a campaign is already running
@@ -4017,10 +5527,110 @@ function proceedWithCampaignResume() {
 }
 
 /**
+ * Show modal to select email provider for campaign
+ */
+function showEmailProviderSelectionModal(onSelectCallback) {
+    const providers = JSON.parse(localStorage.getItem('emailProviders') || '[]');
+    
+    if (providers.length === 0) {
+        showNotification('No email providers available', 'error');
+        return;
+    }
+    
+    const modal = document.getElementById('emailSelectionModal');
+    const overlay = document.getElementById('emailSelectionOverlay');
+    if (!modal || !overlay) {
+        console.error('[ERROR] Email selection modal elements not found!');
+        return;
+    }
+    
+    const providersList = document.getElementById('emailProvidersList');
+    const currentSelected = localStorage.getItem('selectedEmailProvider');
+    
+    // Populate providers list with radio buttons
+    providersList.innerHTML = providers.map(provider => `
+        <div class="email-provider-option" style="padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 0.75rem; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center;">
+            <input type="radio" name="emailProviderSelection" value="${provider.id}" 
+                   style="margin-right: 0.75rem; cursor: pointer;" 
+                   ${String(provider.id) === String(currentSelected) ? 'checked' : ''}>
+            <div style="flex: 1;">
+                <div style="font-weight: 500; color: #1f2937;">${provider.name}</div>
+                <div style="font-size: 0.875rem; color: #6b7280;">${provider.email}</div>
+            </div>
+        </div>
+    `).join('');
+    
+    // Make provider options clickable
+    const options = providersList.querySelectorAll('.email-provider-option');
+    options.forEach(option => {
+        option.addEventListener('click', () => {
+            const radio = option.querySelector('input[type="radio"]');
+            if (radio) {
+                radio.checked = true;
+            }
+        });
+    });
+    
+    // Show modal
+    modal.classList.add('active');
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    
+    // Handle confirm button
+    const confirmBtn = document.getElementById('confirmEmailSelectionBtn');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            const selected = document.querySelector('input[name="emailProviderSelection"]:checked');
+            if (selected) {
+                const providerId = selected.value;
+                localStorage.setItem('selectedEmailProvider', providerId);
+                closeEmailSelectionModal();
+                if (onSelectCallback) {
+                    onSelectCallback(providerId);
+                }
+                proceedWithCampaignStart();
+            } else {
+                showNotification('Please select an email provider', 'warning');
+            }
+        };
+    }
+}
+
+function closeEmailSelectionModal() {
+    const modal = document.getElementById('emailSelectionModal');
+    const overlay = document.getElementById('emailSelectionOverlay');
+    if (modal) modal.classList.remove('active');
+    if (overlay) overlay.classList.remove('active');
+    document.body.style.overflow = 'auto';
+}
+
+/**
+ * Cancel email provider selection
+ */
+function cancelEmailSelection() {
+    const modal = document.getElementById('emailSelectionModal');
+    const overlay = document.getElementById('emailSelectionOverlay');
+    if (modal) modal.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+    window.emailProviderSelectionCallback = null;
+}
+
+/**
+ * Confirm email provider selection (called from button)
+ */
+function confirmEmailSelection() {
+    const modal = document.getElementById('emailSelectionModal');
+    const confirmBtn = modal?.querySelector('.btn-primary');
+    if (confirmBtn) {
+        confirmBtn.click();
+    }
+}
+
+/**
  * Send campaign to backend API
  * @param {object} campaignData - Campaign data to send
  */
-async function sendCampaignToBackend(campaignData) {
+async function sendCampaignDataToBackend(campaignData) {
     try {
         console.log('[DEBUG] Sending campaign to backend:', campaignData);
         
@@ -4156,21 +5766,67 @@ function loadLogsFromFile(csvName) {
 }
 
 function clearTerminalLogs() {
+    return clearTerminalLogsAsync();
+}
+
+async function clearTerminalLogsAsync() {
     const logsList = document.getElementById('logsList');
     const terminalContent = logsList?.querySelector('.terminal-content');
-    
-    if (terminalContent) {
-        // Count logs before clearing
-        const logsCount = terminalContent.querySelectorAll('.terminal-line').length;
-        
-        terminalContent.innerHTML = '<p class="terminal-line terminal-info">$ System ready...</p>';
-        logsList.scrollTop = 0;
-        
-        // Show proper toast notification
-        const message = logsCount > 1 
-            ? `✓ Cleared ${logsCount - 1} log entries` 
-            : `✓ Terminal cleared`;
-        showNotification(message, 'success');
+    const clearBtn = document.getElementById('clearLogsBtn');
+    const originalLabel = clearBtn?.innerHTML;
+
+    if (clearBtn) {
+        clearBtn.disabled = true;
+        clearBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing...';
+    }
+
+    try {
+        const token = getJwtToken();
+        if (!token) {
+            throw new Error('Please login again to clear logs');
+        }
+
+        const queueId = localStorage.getItem('currentQueueId');
+        const params = new URLSearchParams();
+        if (queueId) {
+            params.set('queueId', String(queueId));
+        }
+
+        const endpoint = `${API_BASE_URL}/campaign-queue/events${params.toString() ? `?${params.toString()}` : ''}`;
+        const response = await fetch(endpoint, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                ...buildUserIdHeader(),
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to clear logs from backend');
+        }
+
+        const payload = await response.json().catch(() => ({}));
+        const deleted = Number(payload?.deleted || 0);
+
+        // Clear local caches so UI and local fallback remain consistent with DB.
+        localStorage.removeItem('currentSessionLogs');
+        localStorage.removeItem('allCSVLogs');
+
+        if (terminalContent) {
+            terminalContent.innerHTML = '<p class="terminal-line terminal-info">System ready...</p>';
+            logsList.scrollTop = 0;
+        }
+
+        showNotification(`✓ Cleared ${deleted} persisted log entries`, 'success');
+    } catch (error) {
+        showNotification(`❌ ${error.message}`, 'error');
+    } finally {
+        if (clearBtn) {
+            clearBtn.disabled = false;
+            clearBtn.innerHTML = originalLabel || '<i class="fas fa-trash"></i> Clear Logs';
+        }
     }
 }
 

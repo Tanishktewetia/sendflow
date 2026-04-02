@@ -33,6 +33,8 @@ public interface CsvUploadRepository extends JpaRepository<CsvUpload, Long> {
      * Find uploads by user and ID (security: can't access other users' uploads)
      */
     Optional<CsvUpload> findByIdAndUserId(Long id, Long userId);
+
+    long deleteByUserId(Long userId);
     
     /**
      * Find failed uploads needing attention
@@ -48,4 +50,14 @@ public interface CsvUploadRepository extends JpaRepository<CsvUpload, Long> {
      * Count uploads by user and status
      */
     long countByUserIdAndStatus(Long userId, String status);
+    
+    /**
+     * Find all queued CSVs for a user
+     */
+    List<CsvUpload> findByUserIdAndIsQueuedTrue(Long userId);
+
+    /**
+     * Find recently processed CSVs for terminal/history view.
+     */
+    List<CsvUpload> findTop10ByUserIdAndIsQueuedFalseAndStatusInOrderByProcessedAtDesc(Long userId, List<String> statuses);
 }

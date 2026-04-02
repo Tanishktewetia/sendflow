@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 /**
  * Repository for CampaignQueue entity
@@ -35,13 +36,13 @@ public interface CampaignQueueRepository extends JpaRepository<CampaignQueue, Lo
     /**
      * Count concurrent processing campaigns (non-paused)
      */
-    @Query("SELECT COUNT(cq) FROM CampaignQueue cq WHERE cq.status IN ('PROCESSING', 'PAUSED')")
+    @Query("SELECT COUNT(cq) FROM CampaignQueue cq WHERE cq.status IN ('PROCESSING', 'PAUSED', 'RUNNING', 'IN_PROGRESS', 'REPROCESSING')")
     long countConcurrentCampaigns();
     
     /**
      * Count concurrent campaigns for a specific user
      */
-    @Query("SELECT COUNT(cq) FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.status = 'PROCESSING'")
+    @Query("SELECT COUNT(cq) FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.status IN ('PROCESSING', 'RUNNING', 'IN_PROGRESS', 'REPROCESSING')")
     long countUserProcessingCampaigns(@Param("userId") Long userId);
     
     /**
@@ -54,6 +55,12 @@ public interface CampaignQueueRepository extends JpaRepository<CampaignQueue, Lo
      * Find campaign queue by CSV upload ID
      */
     Optional<CampaignQueue> findByCsvUploadId(Long csvUploadId);
+
+    long deleteByCsvUploadId(Long csvUploadId);
+
+    long deleteByUserId(Long userId);
+
+    long deleteByCampaignId(Long campaignId);
     
     /**
      * Find campaign queue by campaign ID
@@ -71,4 +78,36 @@ public interface CampaignQueueRepository extends JpaRepository<CampaignQueue, Lo
      */
     @Query("SELECT MAX(cq.queuePosition) FROM CampaignQueue cq WHERE cq.status = 'QUEUED'")
     Integer findMaxQueuePosition();
+
+    Optional<CampaignQueue> findFirstByUserIdAndStatusInOrderByStartedAtDesc(Long userId, List<String> statuses);
+
+    List<CampaignQueue> findByUserIdAndStatusInAndCompletedAtIsNotNull(Long userId, List<String> statuses);
+
+        @Query("SELECT COALESCE(SUM(cq.sentRecipients), 0), COALESCE(SUM(cq.failedRecipients), 0), COALESCE(SUM(cq.processedRecipients), 0) " +
+            "FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.status IN ('COMPLETED', 'FAILED') AND cq.completedAt >= :fromTime")
+        Object[] sumCompletedOutcomesSince(@Param("userId") Long userId, @Param("fromTime") LocalDateTime fromTime);
+
+        @Query("SELECT COALESCE(SUM(cq.sentRecipients), 0), COALESCE(SUM(cq.failedRecipients), 0), COALESCE(SUM(cq.processedRecipients), 0) " +
+            "FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.status IN ('COMPLETED', 'FAILED') AND cq.completedAt >= :fromTime AND cq.id <> :excludeQueueId")
+        Object[] sumCompletedOutcomesSinceExcludingQueue(@Param("userId") Long userId,
+                                                         @Param("fromTime") LocalDateTime fromTime,
+                                                         @Param("excludeQueueId") Long excludeQueueId);
+
+        @Query("SELECT COALESCE(SUM(cq.sentRecipients), 0), COALESCE(SUM(cq.failedRecipients), 0), COALESCE(SUM(cq.processedRecipients), 0) " +
+            "FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.status IN ('COMPLETED', 'FAILED')")
+        Object[] sumAllCompletedOutcomes(@Param("userId") Long userId);
+
+            @Query("SELECT COALESCE(SUM(cq.sentRecipients), 0), COALESCE(SUM(cq.failedRecipients), 0), COALESCE(SUM(cq.processedRecipients), 0) " +
+                "FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.completedAt IS NOT NULL")
+            Object[] sumAllCompletedOutcomesAnyStatus(@Param("userId") Long userId);
+
+            @Query("SELECT COALESCE(SUM(cq.sentRecipients), 0), COALESCE(SUM(cq.failedRecipients), 0), COALESCE(SUM(cq.processedRecipients), 0) " +
+                "FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.completedAt IS NOT NULL AND cq.completedAt >= :fromTime")
+            Object[] sumAllCompletedOutcomesAnyStatusSince(@Param("userId") Long userId,
+                                                           @Param("fromTime") LocalDateTime fromTime);
+
+            @Query("SELECT COALESCE(SUM(cq.sentRecipients), 0), COALESCE(SUM(cq.failedRecipients), 0), COALESCE(SUM(cq.processedRecipients), 0) " +
+                "FROM CampaignQueue cq WHERE cq.userId = :userId AND cq.completedAt IS NOT NULL AND cq.id <> :excludeQueueId")
+            Object[] sumAllCompletedOutcomesAnyStatusExcludingQueue(@Param("userId") Long userId,
+                                                                    @Param("excludeQueueId") Long excludeQueueId);
 }

@@ -31,6 +31,7 @@
                     <label>Password</label>
                     <input type="password" placeholder="••••••••" required>
                 </div>
+                <div id="loginInlineError" class="form-inline-error" role="alert" aria-live="assertive"></div>
                 <a href="forgot-password.html" class="forgot-password-link">Forgot password?</a>
                 <button type="submit" class="btn btn-primary">Login</button>
                 <p class="form-toggle">
@@ -98,5 +99,7 @@
 
     <script src="js/api-config.js"></script>
     <script src="js/auth.js"></script>
+
+    <div id="notification" class="notification" role="status" aria-live="polite"></div>
 </body>
 </html>

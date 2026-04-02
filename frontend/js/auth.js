@@ -28,6 +28,21 @@ let passwordResetState = {
 function toggleForms() {
     document.getElementById('loginForm').classList.toggle('active');
     document.getElementById('registerForm').classList.toggle('active');
+    clearLoginInlineError();
+}
+
+function showLoginInlineError(message) {
+    const errorEl = document.getElementById('loginInlineError');
+    if (!errorEl) return;
+    errorEl.textContent = message || '';
+    errorEl.classList.remove('hidden');
+}
+
+function clearLoginInlineError() {
+    const errorEl = document.getElementById('loginInlineError');
+    if (!errorEl) return;
+    errorEl.textContent = '';
+    errorEl.classList.add('hidden');
 }
 
 /**
@@ -46,6 +61,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // Login form handler
     if (document.getElementById('loginForm')) {
         document.getElementById('loginForm').addEventListener('submit', handleLogin);
+        clearLoginInlineError();
+
+        const loginEmailInput = document.querySelector('#loginForm input[type="email"]');
+        const loginPasswordInput = document.querySelector('#loginForm input[type="password"]');
+        if (loginEmailInput) {
+            loginEmailInput.addEventListener('input', clearLoginInlineError);
+        }
+        if (loginPasswordInput) {
+            loginPasswordInput.addEventListener('input', clearLoginInlineError);
+        }
     }
 
     // Register form handler
@@ -71,13 +96,30 @@ document.addEventListener('DOMContentLoaded', function() {
  */
 async function handleLogin(e) {
     e.preventDefault();
+    clearLoginInlineError();
     
-    const email = document.querySelector('#loginForm input[type="email"]').value.toLowerCase().trim();
-    const password = document.querySelector('#loginForm input[type="password"]').value;
+    const emailInput = document.querySelector('#loginForm input[type="email"]');
+    const passwordInput = document.querySelector('#loginForm input[type="password"]');
+    const email = emailInput?.value?.toLowerCase().trim() || '';
+    const password = passwordInput?.value || '';
 
     // Validation
     if (!email || !password) {
+        showLoginInlineError('Please enter email and password.');
         showNotification('❌ Please enter email and password', 'error', 3000);
+        if (!email) {
+            emailInput?.focus();
+        } else {
+            passwordInput?.focus();
+        }
+        return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showLoginInlineError('Please enter a valid email address.');
+        showNotification('❌ Please enter a valid email address', 'error', 3500);
+        emailInput?.focus();
         return;
     }
 
@@ -126,7 +168,26 @@ async function handleLogin(e) {
 
     } catch (error) {
         console.error('Login error:', error);
-        showNotification(`❌ ${error.message || 'Login failed. Please check your credentials.'}`, 'error');
+
+        const rawMessage = String(error?.message || '').toLowerCase();
+        const wrongCreds = rawMessage.includes('invalid')
+            || rawMessage.includes('credentials')
+            || rawMessage.includes('401')
+            || rawMessage.includes('unauthorized')
+            || rawMessage.includes('bad credentials')
+            || rawMessage.includes('incorrect');
+
+        if (wrongCreds) {
+            showLoginInlineError('Wrong email or password. Please try again.');
+            showNotification('❌ Wrong email or password. Please try again.', 'error', 4500);
+            passwordInput.value = '';
+            passwordInput.focus();
+            return;
+        }
+
+        showLoginInlineError(error.message || 'Login failed. Please check your credentials.');
+
+        showNotification(`❌ ${error.message || 'Login failed. Please check your credentials.'}`, 'error', 4500);
     }
 }
 
@@ -645,8 +706,16 @@ function handleLogout() {
  * Clear all notifications from the screen
  */
 function clearAllNotifications() {
-    const notifications = document.querySelectorAll('.notification-toast');
-    notifications.forEach(notif => notif.remove());
+    const notif = document.getElementById('notification');
+    if (!notif) return;
+
+    notif.classList.remove('show', 'type-success', 'type-error', 'type-warning', 'type-info');
+    notif.textContent = '';
+
+    if (window.authNotificationTimeoutId) {
+        clearTimeout(window.authNotificationTimeoutId);
+        window.authNotificationTimeoutId = null;
+    }
 }
 
 /**
@@ -656,84 +725,26 @@ function clearAllNotifications() {
  * @param {number} duration - Duration in ms (0 = no auto-dismiss)
  */
 function showNotification(message, type = 'info', duration = 4000) {
-    // Create notification container
-    const notif = document.createElement('div');
-    notif.className = `notification-toast type-${type}`;
-    
-    // Get colors based on type
-    const colors = {
-        success: { bg: '#10b981', border: '#059669' },
-        error: { bg: '#ef4444', border: '#dc2626' },
-        warning: { bg: '#f59e0b', border: '#d97706' },
-        info: { bg: '#3b82f6', border: '#2563eb' }
-    };
-    
-    const color = colors[type] || colors.info;
-    
-    // Style notification
-    notif.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 14px 18px;
-        background: ${color.bg};
-        border-left: 4px solid ${color.border};
-        color: white;
-        border-radius: 4px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        font-size: 14px;
-        font-weight: 500;
-        z-index: 10000;
-        max-width: 380px;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        animation: slideInRight 0.3s ease-out;
-        word-wrap: break-word;
-    `;
-    
+    const notif = document.getElementById('notification');
+    if (!notif) return null;
+
+    if (window.authNotificationTimeoutId) {
+        clearTimeout(window.authNotificationTimeoutId);
+        window.authNotificationTimeoutId = null;
+    }
+
     notif.textContent = message;
-    document.body.appendChild(notif);
+    notif.classList.remove('type-success', 'type-error', 'type-warning', 'type-info');
+    notif.classList.add(`type-${type}`);
+    notif.classList.add('show');
 
     // Auto-dismiss if duration > 0
     if (duration > 0) {
-        setTimeout(() => {
-            notif.style.animation = 'slideOutRight 0.3s ease-out';
-            setTimeout(() => notif.remove(), 300);
+        window.authNotificationTimeoutId = setTimeout(() => {
+            notif.classList.remove('show');
+            window.authNotificationTimeoutId = null;
         }, duration);
     }
 
     return notif;
 }
-
-/**
- * Add CSS animations if not already present
- */
-(function() {
-    if (!document.querySelector('style[data-auth-animations]')) {
-        const style = document.createElement('style');
-        style.setAttribute('data-auth-animations', 'true');
-        style.textContent = `
-            @keyframes slideInRight {
-                from {
-                    opacity: 0;
-                    transform: translateX(400px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-            }
-            
-            @keyframes slideOutRight {
-                from {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-                to {
-                    opacity: 0;
-                    transform: translateX(400px);
-                }
-            }
-        `;
-        document.head.appendChild(style);
-    }
-})();

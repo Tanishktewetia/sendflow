@@ -28,6 +28,7 @@ public class EmailProviderService {
     
     private final EmailProviderRepository emailProviderRepository;
     private final CampaignRepository campaignRepository;
+    private final UserService userService;
     private final EmailTestService emailTestService;
     
     /**
@@ -297,6 +298,60 @@ public class EmailProviderService {
             System.err.println("[ERROR] Provider verification failed: " + e.getMessage());
             e.printStackTrace();
             return false;
+        }
+    }
+    
+    /**
+     * Set user's default email provider
+     * @param userId User ID
+     * @param providerId Provider ID to set as default
+     */
+    public void setUserDefaultEmailProvider(Long userId, Long providerId) {
+        try {
+            // Verify provider exists and belongs to user
+            EmailProvider provider = emailProviderRepository.findByIdAndUserId(providerId, userId)
+                    .orElseThrow(() -> new RuntimeException("Email provider not found or does not belong to user"));
+            
+            // Update user's default email provider using UserService
+            userService.setDefaultEmailProvider(userId, providerId);
+            System.out.println("[DEBUG] Default email provider set to " + providerId + " for user " + userId);
+        } catch (Exception e) {
+            System.err.println("[ERROR] Failed to set default email provider: " + e.getMessage());
+            throw new RuntimeException("Failed to set default email provider: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Get user's default email provider
+     * @param userId User ID
+     * @return Default email provider or null if not set
+     */
+    public EmailProvider getUserDefaultEmailProvider(Long userId) {
+        try {
+            // Get the default provider ID from UserService
+            Long defaultProviderId = userService.getDefaultEmailProviderId(userId);
+            
+            if (defaultProviderId != null) {
+                // Fetch the provider by ID
+                Optional<EmailProvider> provider = emailProviderRepository.findByIdAndUserId(defaultProviderId, userId);
+                if (provider.isPresent() && provider.get().getIsVerified()) {
+                    System.out.println("[DEBUG] Retrieved default email provider for user " + userId + ": " + defaultProviderId);
+                    return provider.get();
+                }
+            }
+            
+            // If no default set or provider not found, return the most recently verified provider
+            List<EmailProvider> verifiedProviders = getVerifiedProviders(userId);
+            if (!verifiedProviders.isEmpty()) {
+                System.out.println("[DEBUG] No explicit default set, returning most recent verified provider");
+                return verifiedProviders.get(0);
+            }
+            
+            System.out.println("[DEBUG] No verification default email provider found");
+            return null;
+        } catch (Exception e) {
+            System.err.println("[ERROR] Failed to get default email provider: " + e.getMessage());
+            return null;
         }
     }
 }

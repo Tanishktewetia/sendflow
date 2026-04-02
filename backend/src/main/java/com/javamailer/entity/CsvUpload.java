@@ -62,6 +62,16 @@ public class CsvUpload {
     @Column(name = "processed_at")
     private LocalDateTime processedAt;
     
+    @Column(name = "queue_position")
+    private Integer queuePosition; // Position in queue (0-based, for ordering)
+    
+    @Column(name = "is_queued")
+    @Builder.Default
+    private Boolean isQueued = false; // Whether this CSV is in the queue
+    
+    @Column(name = "queued_at")
+    private LocalDateTime queuedAt; // When added to queue
+    
     @PrePersist
     protected void onCreate() {
         uploadedAt = LocalDateTime.now();

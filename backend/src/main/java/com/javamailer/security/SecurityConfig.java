@@ -59,7 +59,13 @@ public class SecurityConfig {
                 "https://yourdomain.com"      // Production domain (update as needed)
         ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(Arrays.asList("Content-Type", "Authorization", "X-Requested-With"));
+        configuration.setAllowedHeaders(Arrays.asList(
+            "Content-Type",
+            "Authorization",
+            "X-Requested-With",
+            "X-User-Id",
+            "x-user-id"
+        ));
         configuration.setExposedHeaders(Arrays.asList("Authorization", "Content-Type"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);

@@ -42,6 +42,13 @@ public class User {
     @Column(name = "avatar_storage_path", length = 500)
     private String avatarStoragePath;
     
+    @Column(name = "default_email_provider_id")
+    private Long defaultEmailProviderId;
+    
+    @Column(name = "email_selection_preference", length = 50)
+    @Builder.Default
+    private String emailSelectionPreference = "default";
+    
     @Column(nullable = false)
     @Builder.Default
     private Boolean isActive = true;

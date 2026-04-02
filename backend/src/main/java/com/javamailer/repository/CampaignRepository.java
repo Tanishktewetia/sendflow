@@ -59,4 +59,16 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
      * Find all active campaigns using a specific email provider
      */
     List<Campaign> findByEmailProviderIdAndStatus(Long emailProviderId, String status);
+
+    /**
+     * Find latest draft for a user
+     */
+    Optional<Campaign> findFirstByUserIdAndStatusOrderByCreatedAtDesc(Long userId, String status);
+
+    /**
+     * Delete drafts for a user
+     */
+    long deleteByUserIdAndStatus(Long userId, String status);
+
+    long deleteByUserId(Long userId);
 }

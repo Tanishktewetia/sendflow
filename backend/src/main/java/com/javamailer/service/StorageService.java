@@ -19,10 +19,11 @@ import java.net.URI;
 import java.util.UUID;
 
 /**
- * Supabase Storage Service (DEPRECATED)
- * This service has been replaced by SupabaseStorageService which uses REST API
- * Keeping this class for reference only - not instantiated as a Spring bean
+ * Supabase Storage Service using AWS SDK S3 API
+ * Provides unified interface for uploading and downloading files
+ * Used by campaign executor for CSV file storage
  */
+@Service
 @RequiredArgsConstructor
 public class StorageService {
     

@@ -159,8 +159,15 @@ async function apiCall(url, options = {}) {
     try {
         const response = await fetch(url, finalOptions);
 
-        // Handle 401 Unauthorized - Try to refresh token
-        if (response.status === 401) {
+        // Handle 401 Unauthorized - only try refresh on authenticated, non-auth requests.
+        const isAuthEndpoint = url.includes('/auth/login')
+            || url.includes('/auth/register')
+            || url.includes('/auth/verify-otp')
+            || url.includes('/auth/resend-otp')
+            || url.includes('/auth/forgot-password')
+            || url.includes('/auth/reset-password');
+
+        if (response.status === 401 && token && !isAuthEndpoint) {
             console.warn('Token expired or invalid, attempting refresh...');
             
             // Try to refresh the token

@@ -76,6 +76,29 @@ public class SupabaseStorageService {
     public void deleteAvatarFile(String filePath) throws IOException {
         deleteFromSupabase("avatar_img", filePath);
     }
+
+    /**
+     * Download CSV file from storage
+     */
+    public byte[] downloadCsvFile(String filePath) throws IOException {
+        String fullUrl = storageApiUrl + "/object/csv_uploads/" + filePath;
+
+        Request request = new Request.Builder()
+                .url(fullUrl)
+                .get()
+                .addHeader("Authorization", "Bearer " + apiKey)
+                .build();
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            if (!response.isSuccessful() || response.body() == null) {
+                String errorBody = response.body() != null ? response.body().string() : "Unknown";
+                throw new IOException("Download failed: " + response.code() + " - " + errorBody);
+            }
+            return response.body().bytes();
+        } catch (Exception e) {
+            throw new IOException("Download error: " + e.getMessage(), e);
+        }
+    }
     
     /**
      * Get public URL for displaying a file

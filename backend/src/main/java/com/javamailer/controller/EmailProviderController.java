@@ -498,4 +498,77 @@ public class EmailProviderController {
                     .body(Map.of("verified", false, "error", e.getMessage()));
         }
     }
+
+    /**
+     * Set email provider as default
+     * POST /api/email-providers/{providerId}/set-as-default
+     */
+    @PostMapping("/{providerId}/set-as-default")
+    public ResponseEntity<?> setDefaultEmailProvider(@PathVariable Long providerId, Authentication authentication) {
+        try {
+            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
+            Long userId = userDetails.getUserId();
+            
+            // Verify that the provider exists and belongs to the user
+            EmailProvider provider = emailProviderService.getProviderByIdAndUserId(providerId, userId)
+                    .orElseThrow(() -> new RuntimeException("Email provider not found"));
+            
+            // Verify that the provider is verified
+            if (!provider.getIsVerified()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Email provider must be verified before setting as default"));
+            }
+            
+            // Update user's default email provider
+            emailProviderService.setUserDefaultEmailProvider(userId, providerId);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", "Default email provider set successfully");
+            response.put("providerId", providerId);
+            response.put("providerType", provider.getProviderType());
+            response.put("displayName", provider.getDisplayName());
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Get user's default email provider
+     * GET /api/email-providers/default
+     */
+    @GetMapping("/default")
+    public ResponseEntity<?> getDefaultEmailProvider(Authentication authentication) {
+        try {
+            JwtUserDetails userDetails = (JwtUserDetails) authentication.getDetails();
+            Long userId = userDetails.getUserId();
+            
+            EmailProvider defaultProvider = emailProviderService.getUserDefaultEmailProvider(userId);
+            
+            if (defaultProvider == null) {
+                return ResponseEntity.ok(Map.of(
+                    "defaultProvider", null,
+                    "message", "No default email provider set"
+                ));
+            }
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("defaultProvider", Map.of(
+                "id", defaultProvider.getId(),
+                "providerType", defaultProvider.getProviderType(),
+                "displayName", defaultProvider.getDisplayName(),
+                "fromEmail", defaultProvider.getFromEmail(),
+                "fromName", defaultProvider.getFromName()
+            ));
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
 }
