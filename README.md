@@ -106,10 +106,12 @@ Manual and ad-hoc test scripts may exist locally. For production workflow, use:
 - If your Render URL is different, set `window.__API_BASE_URL__` before `frontend/js/api-config.js` loads, or save a `api_base_url_override` value in localStorage for quick testing.
 
 ### Backend on Render
+If Render does not show a Java runtime option, use Docker.
+
 1. Create a new Web Service in Render and connect this repository.
-2. Set root directory to `backend` (or use `render.yaml` from repo root).
-3. Build command: `mvn clean package -DskipTests`
-4. Start command: `java -jar target/java-mailer-backend-1.0.0.jar`
+2. Choose `Docker` as the runtime.
+3. Set root directory to `backend`.
+4. Use `backend/Dockerfile` as the image source.
 5. Health check path: `/api/emails/health`
 6. Add required environment variables:
 	- `DB_USERNAME`
@@ -121,6 +123,10 @@ Manual and ad-hoc test scripts may exist locally. For production workflow, use:
 	- `RESEND_API_KEY`
 	- `RESEND_FROM_EMAIL`
 	- `CORS_ALLOWED_ORIGIN_PATTERNS` (example: `https://*.vercel.app,https://your-frontend-domain.vercel.app,http://localhost:3000`)
+
+Docker service notes:
+- The Dockerfile runs the app on Render's `PORT` value automatically.
+- Local development still uses `mvn spring-boot:run` on `8080`.
 
 ## Troubleshooting
 - Port 8080 busy: stop prior backend process

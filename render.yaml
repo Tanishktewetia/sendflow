@@ -1,12 +1,11 @@
 services:
   - type: web
     name: sendflow-backend
-    env: java
+    env: docker
     rootDir: backend
     plan: free
     autoDeploy: true
-    buildCommand: mvn clean package -DskipTests
-    startCommand: java -jar target/java-mailer-backend-1.0.0.jar
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /api/emails/health
     envVars:
       - key: CORS_ALLOWED_ORIGIN_PATTERNS
