@@ -1,33 +1,36 @@
 {
-  "cleanUrls": true,
-  "rewrites": [
+  "version": 2,
+  "routes": [
     {
-      "source": "/",
-      "destination": "/index.html"
+      "handle": "filesystem"
     },
     {
-      "source": "/auth",
-      "destination": "/auth.html"
+      "src": "^/$",
+      "dest": "/index.html"
     },
     {
-      "source": "/app",
-      "destination": "/app.html"
+      "src": "^/auth/?$",
+      "dest": "/auth.html"
     },
     {
-      "source": "/forgot-password",
-      "destination": "/forgot-password.html"
+      "src": "^/app/?$",
+      "dest": "/app.html"
     },
     {
-      "source": "/how-it-works",
-      "destination": "/how-it-works.html"
+      "src": "^/forgot-password/?$",
+      "dest": "/forgot-password.html"
     },
     {
-      "source": "/privacy",
-      "destination": "/privacy.html"
+      "src": "^/how-it-works/?$",
+      "dest": "/how-it-works.html"
     },
     {
-      "source": "/tos",
-      "destination": "/tos.html"
+      "src": "^/privacy/?$",
+      "dest": "/privacy.html"
+    },
+    {
+      "src": "^/tos/?$",
+      "dest": "/tos.html"
     }
   ]
 }
