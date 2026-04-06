@@ -100,6 +100,23 @@ Manual and ad-hoc test scripts may exist locally. For production workflow, use:
 - Serve frontend through any static web server
 - Configure environment-specific DB, auth, and CORS values
 
+### Backend on Render
+1. Create a new Web Service in Render and connect this repository.
+2. Set root directory to `backend` (or use `render.yaml` from repo root).
+3. Build command: `mvn clean package -DskipTests`
+4. Start command: `java -jar target/java-mailer-backend-1.0.0.jar`
+5. Health check path: `/api/emails/health`
+6. Add required environment variables:
+	- `DB_USERNAME`
+	- `DB_PASSWORD`
+	- `JWT_SECRET`
+	- `SUPABASE_API_KEY`
+	- `SUPABASE_S3_ACCESS_KEY`
+	- `SUPABASE_S3_SECRET_KEY`
+	- `RESEND_API_KEY`
+	- `RESEND_FROM_EMAIL`
+	- `CORS_ALLOWED_ORIGIN_PATTERNS` (example: `https://*.vercel.app,https://your-frontend-domain.vercel.app,http://localhost:3000`)
+
 ## Troubleshooting
 - Port 8080 busy: stop prior backend process
 - Port 3000 busy: run frontend on another port
