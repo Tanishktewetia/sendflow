@@ -4,7 +4,31 @@
  */
 
 // Backend API Base URL
-const API_BASE_URL = 'http://localhost:8080/api';
+// Local development uses the Spring Boot default on port 8080.
+// Production can override this with window.__API_BASE_URL__ (or a localStorage fallback).
+const LOCAL_API_BASE_URL = 'http://localhost:8080/api';
+const PRODUCTION_API_BASE_URL = 'https://sendflow-backend.onrender.com/api';
+
+function resolveApiBaseUrl() {
+    const runtimeOverride = typeof window !== 'undefined' ? window.__API_BASE_URL__ : null;
+    if (runtimeOverride && typeof runtimeOverride === 'string' && runtimeOverride.trim()) {
+        return runtimeOverride.replace(/\/$/, '');
+    }
+
+    const storedOverride = typeof localStorage !== 'undefined'
+        ? localStorage.getItem('api_base_url_override')
+        : null;
+    if (storedOverride && storedOverride.trim()) {
+        return storedOverride.replace(/\/$/, '');
+    }
+
+    const hostname = typeof window !== 'undefined' && window.location ? window.location.hostname : '';
+    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+    return isLocalHost ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL;
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 // Supabase Storage URL
 const SUPABASE_URL = 'https://gksgsxkusmorkbtkjemh.supabase.co';

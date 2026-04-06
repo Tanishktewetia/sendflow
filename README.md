@@ -100,6 +100,11 @@ Manual and ad-hoc test scripts may exist locally. For production workflow, use:
 - Serve frontend through any static web server
 - Configure environment-specific DB, auth, and CORS values
 
+### Frontend API Base URL
+- Local development uses `http://localhost:8080/api` automatically.
+- Production uses `https://sendflow-backend.onrender.com/api` by default.
+- If your Render URL is different, set `window.__API_BASE_URL__` before `frontend/js/api-config.js` loads, or save a `api_base_url_override` value in localStorage for quick testing.
+
 ### Backend on Render
 1. Create a new Web Service in Render and connect this repository.
 2. Set root directory to `backend` (or use `render.yaml` from repo root).
