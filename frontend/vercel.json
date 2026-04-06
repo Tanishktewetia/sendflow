@@ -1,0 +1,33 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/auth",
+      "destination": "/auth.html"
+    },
+    {
+      "source": "/app",
+      "destination": "/app.html"
+    },
+    {
+      "source": "/forgot-password",
+      "destination": "/forgot-password.html"
+    },
+    {
+      "source": "/how-it-works",
+      "destination": "/how-it-works.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/tos",
+      "destination": "/tos.html"
+    }
+  ]
+}
